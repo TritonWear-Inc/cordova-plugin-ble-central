@@ -134,6 +134,7 @@ public class BLECentralPlugin extends CordovaPlugin {
 
     @Override
     public boolean execute(String action, CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        LOG.i("Running Tritonwear's Fork for Android!");
         LOG.d(TAG, "action = %s", action);
 
         if (bluetoothAdapter == null) {
@@ -376,6 +377,9 @@ public class BLECentralPlugin extends CordovaPlugin {
     }
 
     private void onBluetoothStateChange(Intent intent) {
+        LOG.i("Running Tritonwear's Fork for Android!");
+        LOG.i("Running Tritonwear's Fork for Android!");
+
         final String action = intent.getAction();
 
         if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED)) {
@@ -423,6 +427,7 @@ public class BLECentralPlugin extends CordovaPlugin {
     }
 
     private void connect(CallbackContext callbackContext, String macAddress) {
+        LOG.i("Running Tritonwear's Fork for Android!");
         if (!peripherals.containsKey(macAddress) && BLECentralPlugin.this.bluetoothAdapter.checkBluetoothAddress(macAddress)) {
             BluetoothDevice device = BLECentralPlugin.this.bluetoothAdapter.getRemoteDevice(macAddress);
             Peripheral peripheral = new Peripheral(device);
@@ -567,6 +572,7 @@ public class BLECentralPlugin extends CordovaPlugin {
     private void read(CallbackContext callbackContext, String macAddress, UUID serviceUUID, UUID characteristicUUID) {
 
         Peripheral peripheral = peripherals.get(macAddress);
+        LOG.i("Running Tritonwear's Fork for Android!");
 
         if (peripheral == null) {
             callbackContext.error("Peripheral " + macAddress + " not found.");
@@ -603,6 +609,7 @@ public class BLECentralPlugin extends CordovaPlugin {
                        byte[] data, int writeType) {
 
         Peripheral peripheral = peripherals.get(macAddress);
+        LOG.i("Running Tritonwear's Fork for Android!");
 
         if (peripheral == null) {
             callbackContext.error("Peripheral " + macAddress + " not found.");
@@ -706,6 +713,7 @@ public class BLECentralPlugin extends CordovaPlugin {
 
     private void findLowEnergyDevices(CallbackContext callbackContext, UUID[] serviceUUIDs, int scanSeconds) {
 
+        LOG.i("Running Tritonwear's Fork for Android!");
 
 
         if (!locationServicesEnabled()) {

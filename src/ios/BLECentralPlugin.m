@@ -62,6 +62,7 @@
 
 // TODO add timeout
 - (void)connect:(CDVInvokedUrlCommand *)command {
+    NSLog(@"Tritonwear's Fork of BLE SCANNERS");
     NSLog(@"connect");
     NSString *uuid = [command argumentAtIndex:0];
 
@@ -134,6 +135,7 @@
 
 // read: function (device_id, service_uuid, characteristic_uuid, success, failure) {
 - (void)read:(CDVInvokedUrlCommand*)command {
+    NSLog(@"Tritonwear's Fork of BLE SCANNERS");
     NSLog(@"read");
 
     BLECommandContext *context = [self getData:command prop:CBCharacteristicPropertyRead];
@@ -155,6 +157,7 @@
 
 // write: function (device_id, service_uuid, characteristic_uuid, value, success, failure) {
 - (void)write:(CDVInvokedUrlCommand*)command {
+    NSLog(@"Tritonwear's Fork of BLE SCANNERS");
     BLECommandContext *context = [self getData:command prop:CBCharacteristicPropertyWrite];
     NSData *message = [command argumentAtIndex:3]; // This is binary
     if (context) {
@@ -273,6 +276,7 @@
 }
 
 - (void)scan:(CDVInvokedUrlCommand*)command {
+    NSLog(@"Tritonwear's Fork of BLE SCANNERS");
     NSLog(@"scan");
     discoverPeripheralCallbackId = [command.callbackId copy];
 
@@ -290,7 +294,9 @@
 }
 
 - (void)startScan:(CDVInvokedUrlCommand*)command {
+    NSLog(@"Tritonwear's Fork of BLE SCANNERS");
     NSLog(@"startScan");
+
     discoverPeripheralCallbackId = [command.callbackId copy];
     NSArray<NSString *> *serviceUUIDStrings = [command argumentAtIndex:0];
     NSArray<CBUUID *> *serviceUUIDs = [self uuidStringsToCBUUIDs:serviceUUIDStrings];
