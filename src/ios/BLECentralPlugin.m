@@ -77,6 +77,7 @@
         NSString *error = [NSString stringWithFormat:@"Could not find peripheral %@.", uuid];
         NSLog(@"%@", error);
         CDVPluginResult *pluginResult = nil;
+        NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, error);
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
     }
@@ -100,6 +101,7 @@
         NSString *error = [NSString stringWithFormat:@"Could not find peripheral %@.", uuid];
         NSLog(@"%@", error);
         CDVPluginResult *pluginResult = nil;
+        NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, error);
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
     }
@@ -116,12 +118,14 @@
     if (!peripheral) {
         NSString *message = [NSString stringWithFormat:@"Peripheral %@ not found", uuid];
         NSLog(@"%@", message);
+        NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, message);
         CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 
     } else {
 
         [connectCallbacks removeObjectForKey:uuid];
+        NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, "Peripheral disconnected");
         [self cleanupOperationCallbacks:peripheral withResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Peripheral disconnected"]];
 
         if (peripheral && peripheral.state != CBPeripheralStateDisconnected) {
@@ -142,6 +146,7 @@
     if (context) {
         CBPeripheral *peripheral = [context peripheral];
         if ([peripheral state] != CBPeripheralStateConnected) {
+            NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, "Peripheral is not connected");
             CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Peripheral is not connected"];
             [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
             return;
@@ -164,6 +169,7 @@
         if (message != nil) {
             CBPeripheral *peripheral = [context peripheral];
             if ([peripheral state] != CBPeripheralStateConnected) {
+                NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, "Peripheral is not connected");
                 CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Peripheral is not connected"];
                 [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
                 return;
@@ -179,6 +185,7 @@
             // response is sent from didWriteValueForCharacteristic
         } else {
             CDVPluginResult *pluginResult = nil;
+            NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, "message was null");
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"message was null"];
             [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
         }
@@ -197,6 +204,7 @@
         if (message != nil) {
             CBPeripheral *peripheral = [context peripheral];
             if ([peripheral state] != CBPeripheralStateConnected) {
+                NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, "Peripheral is not connected");
                 CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Peripheral is not connected"];
                 [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
                 return;
@@ -208,6 +216,7 @@
 
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
         } else {
+            NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, "message was null");
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"message was null"];
         }
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
@@ -342,6 +351,7 @@
     if (peripheral && peripheral.state == CBPeripheralStateConnected) {
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
     } else {
+        NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, "Not connected");
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Not connected"];
     }
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
@@ -358,6 +368,7 @@
         [pluginResult setKeepCallbackAsBool:TRUE];
         NSLog(@"Start state notifications on callback %@", stateCallbackId);
     } else {
+        NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, "State callback already registered");
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"State callback already registered"];
     }
 
@@ -395,6 +406,7 @@
         NSString *error = [NSString stringWithFormat:@"Need to be connected to peripheral %@ to read RSSI.", uuid];
         NSLog(@"%@", error);
         CDVPluginResult *pluginResult = nil;
+        NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, error);
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
     }
@@ -516,6 +528,7 @@
 
     NSString *connectCallbackId = [connectCallbacks valueForKey:[peripheral uuidAsString]];
     [connectCallbacks removeObjectForKey:[peripheral uuidAsString]];
+    NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, "Peripheral disconnected");
     [self cleanupOperationCallbacks:peripheral withResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Peripheral disconnected"]];
 
     if (connectCallbackId) {
@@ -546,6 +559,7 @@
     [self cleanupOperationCallbacks:peripheral withResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Peripheral disconnected"]];
 
     CDVPluginResult *pluginResult = nil;
+    NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, peripheral);
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:[peripheral asDictionary]];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:connectCallbackId];
 }
@@ -602,6 +616,7 @@
         CDVPluginResult *pluginResult = nil;
         if (error) {
             NSLog(@"%@", error);
+            NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, [error localizedDescription]);
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
         } else {
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArrayBuffer:data];
@@ -619,6 +634,7 @@
         
         if (error) {
             NSLog(@"%@", error);
+            NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, [error localizedDescription]);
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
         } else {
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArrayBuffer:data];
@@ -640,6 +656,7 @@
     if (!characteristic.isNotifying && stopNotificationCallbackId) {
         if (error) {
             NSLog(@"%@", error);
+            NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, [error localizedDescription]);
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
         } else {
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
@@ -653,6 +670,7 @@
     if (characteristic.isNotifying && startNotificationCallbackId) {
         if (error) {
             NSLog(@"%@", error);
+            NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, [error localizedDescription]);
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
             [self.commandDelegate sendPluginResult:pluginResult callbackId:startNotificationCallbackId];
             [startNotificationCallbacks removeObjectForKey:key];
@@ -675,6 +693,7 @@
         CDVPluginResult *pluginResult = nil;
         if (error) {
             NSLog(@"%@", error);
+            NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, [error localizedDescription]);
             pluginResult = [CDVPluginResult
                 resultWithStatus:CDVCommandStatus_ERROR
                 messageAsString:[error localizedDescription]
@@ -697,6 +716,7 @@
         CDVPluginResult* pluginResult = nil;
         if (error) {
             NSLog(@"%@", error);
+            NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, [error localizedDescription]);
             pluginResult = [CDVPluginResult
                 resultWithStatus:CDVCommandStatus_ERROR
                 messageAsString:[error localizedDescription]];
@@ -794,8 +814,8 @@
     if (!peripheral) {
 
         NSLog(@"Could not find peripheral with UUID %@", deviceUUIDString);
-
         NSString *errorMessage = [NSString stringWithFormat:@"Could not find peripheral with UUID %@", deviceUUIDString];
+        NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, errorMessage);
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMessage];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 
@@ -814,6 +834,7 @@
         NSString *errorMessage = [NSString stringWithFormat:@"Could not find service with UUID %@ on peripheral with UUID %@",
                                   serviceUUIDString,
                                   peripheral.identifier.UUIDString];
+        NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, errorMessage);
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMessage];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 
@@ -844,6 +865,7 @@
                                   characteristicUUIDString,
                                   serviceUUIDString,
                                   peripheral.identifier.UUIDString];
+        NSLog(@"TW I WANT TO see your error! : %@  -> error: %@", CDVCommandStatus_ERROR, errorMessage);
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMessage];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 
