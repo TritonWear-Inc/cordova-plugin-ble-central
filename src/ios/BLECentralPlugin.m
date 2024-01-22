@@ -1171,9 +1171,9 @@
         case CBCentralManagerStateUnknown:
             return @"State unknown (CBCentralManagerStateUnknown)";
         case CBCentralManagerStateResetting:
-            return @"State resetting (CBCentralManagerStateUnknown)";
+            return @"State resetting (CBCentralManagerStateResetting)";
         case CBCentralManagerStateUnsupported:
-            return @"State BLE unsupported (CBCentralManagerStateResetting)";
+            return @"State BLE unsupported (CBCentralManagerStateUnsupported)";
         case CBCentralManagerStateUnauthorized:
             return @"State unauthorized (CBCentralManagerStateUnauthorized)";
         case CBCentralManagerStatePoweredOff:
