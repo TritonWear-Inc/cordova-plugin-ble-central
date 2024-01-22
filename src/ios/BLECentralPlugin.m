@@ -652,6 +652,7 @@
     // @todo - We have discovered that duplicate peripherals can exist so we will remove everything and allow
     // the plugin to repopulate the list - If we do not do this then we could end up with problems finding peripherals
     // that can be connected with but are not able to read from/write to
+    NSLog(@"Removing all objects from peripherals");
     [peripherals removeAllObjects];
 }
 
