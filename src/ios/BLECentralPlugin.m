@@ -99,7 +99,7 @@
             for (id uuid in restoredScanServices) {
                 [uuids addObject:[uuid UUIDString]];
             }
-            
+
             state[@"scanServiceUUIDs"] = uuids;
         }
 
@@ -159,15 +159,15 @@
     }
 
     NSString *uuid = [command argumentAtIndex:0];
-    
+
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
     }
-    
+
     if (peripheral) {
         NSLog(@"Autoconnecting to peripheral with UUID : %@", uuid);
-        
+
         [connectCallbacks setObject:[command.callbackId copy] forKey:[peripheral uuidAsString]];
         [manager connectPeripheral:peripheral options:nil];
     } else {
@@ -177,7 +177,7 @@
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
     }
-    
+
 }
 
 // disconnect: function (device_id, success, failure) {
@@ -505,16 +505,16 @@
     NSLog(@"peripheralsWithIdentifiers");
     NSArray *identifierUUIDStrings = [command argumentAtIndex:0];
     NSArray<NSUUID *> *identifiers = [self uuidStringsToNSUUIDs:identifierUUIDStrings];
-    
+
     NSArray<CBPeripheral *> *foundPeripherals = [manager retrievePeripheralsWithIdentifiers:identifiers];
     // TODO are any of these connected?
     NSMutableArray<NSDictionary *> *found = [NSMutableArray new];
-    
+
     for (CBPeripheral *peripheral in foundPeripherals) {
         [peripherals addObject:peripheral];   // TODO do we save these?
         [found addObject:[peripheral asDictionary]];
     }
-    
+
     CDVPluginResult *pluginResult = nil;
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:found];
     NSLog(@"Peripherals with identifiers %@ %@", identifierUUIDStrings, found);
@@ -537,7 +537,7 @@
         }
         NSLog(@"Cleared callbacks for L2CAP channel key %@", key);
     }
-    
+
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
@@ -648,12 +648,21 @@
             [self centralManager:central didDisconnectPeripheral:peripheral error:nil];
         }
     }
+
+    // @todo - We have discovered that duplicate peripherals can exist so we will remove everything and allow
+    // the plugin to repopulate the list - If we do not do this then we could end up with problems finding peripherals
+    // that can be connected with but are not able to read from/write to
+    [peripherals removeAllObjects];
 }
 
 - (void)centralManager:(CBCentralManager *)central didConnectPeripheral:(CBPeripheral *)peripheral {
     NSLog(@"didConnectPeripheral");
 
     peripheral.delegate = self;
+
+    // Remove and re-add the peripheral in case updates from the CBCentralManager do not come with it
+    [peripherals removeObject:peripheral];
+    [peripherals addObject:peripheral];
 
     // NOTE: it's inefficient to discover all services
     [peripheral discoverServices:nil];
@@ -778,14 +787,14 @@
     if(readCallbackId) {
         NSData *data = characteristic.value; // send RAW data to Javascript
         CDVPluginResult *pluginResult = nil;
-        
+
         if (error) {
             NSLog(@"%@", error);
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
         } else {
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArrayBuffer:data];
         }
-        
+
         [self.commandDelegate sendPluginResult:pluginResult callbackId:readCallbackId];
 
         [readCallbacks removeObjectForKey:key];
@@ -798,7 +807,7 @@
     NSString *stopNotificationCallbackId = [stopNotificationCallbacks objectForKey:key];
 
     CDVPluginResult *pluginResult = nil;
-    
+
     if (stopNotificationCallbackId) {
         if (!characteristic.isNotifying) {
             // successfully stopped notifications
@@ -825,7 +834,7 @@
             // successfully started notifications
             // notification start succeeded, move the callback to the value notifications dict
             [notificationCallbacks setObject:startNotificationCallbackId forKey:key];
-            
+
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"registered"];
             [pluginResult setKeepCallbackAsBool:TRUE]; // keep for notification
         } else {
@@ -1213,7 +1222,7 @@
 - (void) internalStopScan {
     [scanTimer invalidate];
     scanTimer = nil;
-    
+
     if ([manager state] == CBManagerStatePoweredOn) {
         [manager stopScan];
     }
