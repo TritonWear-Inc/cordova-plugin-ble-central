@@ -1050,9 +1050,6 @@
     // If the service was not found, try to retrieve the peripheral from the manager and retry finding the service
     if (!service)
     {
-        NSLog(@"Could not find service with UUID %@ on peripheral with UUID %@ - Retrieving peripheral from manager",
-              serviceUUIDString,
-              peripheral.identifier.UUIDString);
         peripheral = [self retrievePeripheralWithUUID:deviceUUIDString];
         [self removePeripheralsWithUUID:deviceUUIDString];
         [peripherals addObject:peripheral];
