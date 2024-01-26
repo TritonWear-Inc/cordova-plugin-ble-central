@@ -128,6 +128,7 @@
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
+        [peripherals addObject:peripheral];
     }
 
     if (peripheral) {
@@ -163,6 +164,7 @@
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
+        [peripherals addObject:peripheral];
     }
 
     if (peripheral) {
@@ -662,7 +664,7 @@
     peripheral.delegate = self;
 
     // Remove and re-add the peripheral in case updates from the CBCentralManager do not come with it
-    [peripherals removeObject:peripheral];
+    [self removePeripheralsWithUUID:[peripheral uuidAsString]];
     [peripherals addObject:peripheral];
 
     // NOTE: it's inefficient to discover all services
@@ -952,7 +954,6 @@
     CBPeripheral *peripheral = nil;
     if ([existingPeripherals count] > 0) {
         peripheral = [existingPeripherals firstObject];
-        [peripherals addObject:peripheral];
     }
     return peripheral;
 }
@@ -1046,6 +1047,15 @@
 
     CBService *service = [self findServiceFromUUID:serviceUUID p:peripheral];
 
+    // If the service was not found, try to retrieve the peripheral from the manager and retry finding the service
+    if (!service)
+    {
+        peripheral = [self retrievePeripheralWithUUID:deviceUUIDString];
+        [self removePeripheralsWithUUID:deviceUUIDString];
+        [peripherals addObject:peripheral];
+        service = [self findServiceFromUUID:serviceUUID p:peripheral];
+    }
+
     if (!service)
     {
         NSLog(@"Could not find service with UUID %@ on peripheral with UUID %@",
@@ -1111,6 +1121,20 @@
 +(BOOL) isKey: (NSString *)key forPeripheral:(CBPeripheral *)peripheral {
     NSArray *keyArray = [key componentsSeparatedByString: @"|"];
     return [[peripheral uuidAsString] compare:keyArray[0]] == NSOrderedSame;
+}
+
+-(void) removePeripheralsWithUUID:(NSString *)uuid {
+    NSMutableArray *peripheralsToRemove = [NSMutableArray new];
+
+    for (CBPeripheral *peripheral in peripherals) {
+        if ([[peripheral uuidAsString] isEqualToString:uuid]) {
+            [peripheralsToRemove addObject:peripheral];
+        }
+    }
+
+    for (CBPeripheral *peripheral in peripheralsToRemove) {
+        [peripherals removeObject:peripheral];
+    }
 }
 
 -(void) cleanupOperationCallbacks: (CBPeripheral *)peripheral withResult:(CDVPluginResult *) result {
