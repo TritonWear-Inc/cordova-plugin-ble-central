@@ -1238,7 +1238,7 @@
 -(void) removePeripheralsWithUUID:(NSString *)uuid {
     NSMutableArray *peripheralsToRemove = [NSMutableArray new];
 
-    for (CBPeripheral *peripheral in peripherals) {
+    for (CBPeripheral *peripheral in [peripherals allValues]) {
         if ([[peripheral uuidAsString] isEqualToString:uuid]) {
             [peripheralsToRemove addObject:peripheral];
         }
