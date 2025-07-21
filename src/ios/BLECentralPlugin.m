@@ -132,7 +132,8 @@
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
-        [peripherals addObject:[peripheral asDictionary]];
+        // [peripherals addObject:[peripheral asDictionary]];
+        [peripherals setObject:peripheral forKey:peripheral.identifier];
     }
 
     if (peripheral) {
@@ -171,7 +172,8 @@
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
-        [peripherals addObject:[peripheral asDictionary]];
+        // [peripherals addObject:[peripheral asDictionary]];
+        [peripherals setObject:peripheral forKey:peripheral.identifier];
     }
 
     if (peripheral) {
@@ -733,7 +735,8 @@
 
     // Remove and re-add the peripheral in case updates from the CBCentralManager do not come with it
     [self removePeripheralsWithUUID:[peripheral uuidAsString]];
-    [peripherals addObject:[peripheral asDictionary]];
+    // [peripherals addObject:[peripheral asDictionary]];
+    [peripherals setObject:peripheral forKey:peripheral.identifier];
 
     // NOTE: it's inefficient to discover all services
     [peripheral discoverServices:nil];
