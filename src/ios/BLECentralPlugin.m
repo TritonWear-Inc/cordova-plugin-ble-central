@@ -132,7 +132,7 @@
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
-        [peripherals addObject:peripheral];
+        [peripherals addObject:[peripheral asDictionary]];
     }
 
     if (peripheral) {
@@ -171,7 +171,7 @@
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
-        [peripherals addObject:peripheral];
+        [peripherals addObject:[peripheral asDictionary]];
     }
 
     if (peripheral) {
@@ -733,7 +733,7 @@
 
     // Remove and re-add the peripheral in case updates from the CBCentralManager do not come with it
     [self removePeripheralsWithUUID:[peripheral uuidAsString]];
-    [peripherals addObject:peripheral];
+    [peripherals addObject:[peripheral asDictionary]];
 
     // NOTE: it's inefficient to discover all services
     [peripheral discoverServices:nil];
@@ -1168,12 +1168,12 @@
     CBService *service = [self findServiceFromUUID:serviceUUID p:peripheral];
 
     // If the service was not found, try to retrieve the peripheral from the manager and retry finding the service
-    if (!service) {
-        peripheral = [self retrievePeripheralWithUUID:deviceUUIDString];
-        [self removePeripheralsWithUUID:deviceUUIDString];
-        [peripherals addObject:peripheral];
-        service = [self findServiceFromUUID:serviceUUID p:peripheral];
-    }
+    // if (!service) {
+        // peripheral = [self retrievePeripheralWithUUID:deviceUUIDString];
+        // [self removePeripheralsWithUUID:deviceUUIDString];
+        // [peripherals addObject:peripheral];
+        // service = [self findServiceFromUUID:serviceUUID p:peripheral];
+    // }
 
     if (!service) {
         NSString *errorMessage = [NSString stringWithFormat:@"Could not find service with UUID %@ on peripheral with UUID %@",
@@ -1242,7 +1242,7 @@
     }
 
     for (CBPeripheral *peripheral in peripheralsToRemove) {
-        [peripherals removeObject:peripheral];
+        [peripherals removeObjectForKey:peripheral.identifier];
     }
 }
 
