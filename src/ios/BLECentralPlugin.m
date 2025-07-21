@@ -22,8 +22,8 @@
 @interface BLECentralPlugin() {
     NSDictionary *bluetoothStates;
 }
-- (CBPeripheral *)findPeripheralByUUID:(NSString *)uuid;
-- (CBPeripheral *)retrievePeripheralWithUUID:(NSString *)uuid;
+- (CBPeripheral *)findPeripheralByUUID:(NSUUID *)uuid;
+- (CBPeripheral *)retrievePeripheralWithUUID:(NSUUID *)uuid;
 - (void)stopScanTimer:(NSTimer *)timer;
 @end
 
@@ -50,7 +50,7 @@
         options[CBCentralManagerOptionRestoreIdentifierKey] = restoreIdentifier;
     }
 
-    peripherals = [NSMutableSet new];
+    peripherals = [NSMutableDictionary new];
     manager = [[CBCentralManager alloc] initWithDelegate:self queue:nil options:options];
 
     restoredState = nil;
@@ -63,12 +63,12 @@
     stopNotificationCallbacks = [NSMutableDictionary new];
     l2CapContexts = [NSMutableDictionary new];
     bluetoothStates = [NSDictionary dictionaryWithObjectsAndKeys:
-                       @"unknown", @(CBCentralManagerStateUnknown),
-                       @"resetting", @(CBCentralManagerStateResetting),
-                       @"unsupported", @(CBCentralManagerStateUnsupported),
-                       @"unauthorized", @(CBCentralManagerStateUnauthorized),
-                       @"off", @(CBCentralManagerStatePoweredOff),
-                       @"on", @(CBCentralManagerStatePoweredOn),
+                       @"unknown", @(CBManagerStateUnknown),
+                       @"resetting", @(CBManagerStateResetting),
+                       @"unsupported", @(CBManagerStateUnsupported),
+                       @"unauthorized", @(CBManagerStateUnauthorized),
+                       @"off", @(CBManagerStatePoweredOff),
+                       @"on", @(CBManagerStatePoweredOn),
                        nil];
     readRSSICallbacks = [NSMutableDictionary new];
 }
@@ -124,7 +124,11 @@
         return;
     }
 
-    NSString *uuid = [command argumentAtIndex:0];
+    NSUUID *uuid = [self getUUID:command argumentAtIndex:0];
+    if (uuid == nil) {
+        return;
+    }
+
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
@@ -159,7 +163,10 @@
         return;
     }
 
-    NSString *uuid = [command argumentAtIndex:0];
+    NSUUID *uuid = [self getUUID:command argumentAtIndex:0];
+    if (uuid == nil) {
+        return;
+    }
 
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
@@ -186,7 +193,11 @@
 - (void)disconnect:(CDVInvokedUrlCommand*)command {
     NSLog(@"disconnect");
 
-    NSString *uuid = [command argumentAtIndex:0];
+    NSUUID *uuid = [self getUUID:command argumentAtIndex:0];
+    if (uuid == nil) {
+        return;
+    }
+
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
 
     if (!peripheral) {
@@ -344,14 +355,14 @@
 
 - (void)isEnabled:(CDVInvokedUrlCommand*)command {
     CDVPluginResult *pluginResult = nil;
-    int bluetoothState = [manager state];
+    CBManagerState bluetoothState = [manager state];
 
-    BOOL enabled = bluetoothState == CBCentralManagerStatePoweredOn;
+    BOOL enabled = bluetoothState == CBManagerStatePoweredOn;
 
     if (enabled) {
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
     } else {
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsInt:bluetoothState];
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsNSInteger:bluetoothState];
     }
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
@@ -369,7 +380,21 @@
 
     discoverPeripheralCallbackId = [command.callbackId copy];
     NSArray<NSString *> *serviceUUIDStrings = [command argumentAtIndex:0];
+    if (serviceUUIDStrings != nil && ![serviceUUIDStrings isKindOfClass:[NSArray class]]) {
+        NSLog(@"Malformed UUID");
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Malformed UUID"];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+        return;
+    }
+
     NSArray<CBUUID *> *serviceUUIDs = [self uuidStringsToCBUUIDs:serviceUUIDStrings];
+    if (serviceUUIDs == nil) {
+        NSLog(@"Malformed UUID");
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Malformed UUID"];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+        return;
+    }
+
     NSDictionary *options = command.arguments[1];
 
     NSMutableDictionary *scanOptions = [NSMutableDictionary new];
@@ -407,9 +432,13 @@
 
 
 - (void)isConnected:(CDVInvokedUrlCommand*)command {
-    CDVPluginResult *pluginResult = nil;
-    CBPeripheral *peripheral = [self findPeripheralByUUID:[command argumentAtIndex:0]];
+    NSUUID *uuid = [self getUUID:command argumentAtIndex:0];
+    if (uuid == nil) {
+        return;
+    }
 
+    CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
+    CDVPluginResult *pluginResult = nil;
     if (peripheral && peripheral.state == CBPeripheralStateConnected) {
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
     } else {
@@ -423,8 +452,8 @@
 
     if (stateCallbackId == nil) {
         stateCallbackId = [command.callbackId copy];
-        int bluetoothState = [manager state];
-        NSString *state = [bluetoothStates objectForKey:[NSNumber numberWithInt:bluetoothState]];
+        CBManagerState bluetoothState = [manager state];
+        NSString *state = [bluetoothStates objectForKey:@(bluetoothState)];
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:state];
         [pluginResult setKeepCallbackAsBool:TRUE];
         NSLog(@"Start state notifications on callback %@", stateCallbackId);
@@ -455,7 +484,10 @@
 
 - (void)readRSSI:(CDVInvokedUrlCommand*)command {
     NSLog(@"readRSSI");
-    NSString *uuid = [command argumentAtIndex:0];
+    NSUUID *uuid = [self getUUID:command argumentAtIndex:0];
+    if (uuid == nil) {
+        return;
+    }
 
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
 
@@ -484,14 +516,27 @@
         return;
     }
 
-    NSArray *serviceUUIDStrings = [command argumentAtIndex:0];
+    NSArray<NSString *> *serviceUUIDStrings = [command argumentAtIndex:0];
+    if (serviceUUIDStrings != nil && ![serviceUUIDStrings isKindOfClass:[NSArray class]]) {
+        NSLog(@"Malformed UUID");
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Malformed UUID"];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+        return;
+    }
+
     NSArray<CBUUID *> *serviceUUIDs = [self uuidStringsToCBUUIDs:serviceUUIDStrings];
+    if (serviceUUIDs == nil) {
+        NSLog(@"Malformed UUID");
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Malformed UUID"];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+        return;
+    }
 
     NSArray<CBPeripheral *> *connectedPeripherals = [manager retrieveConnectedPeripheralsWithServices:serviceUUIDs];
     NSMutableArray<NSDictionary *> *connected = [NSMutableArray new];
 
     for (CBPeripheral *peripheral in connectedPeripherals) {
-        [peripherals addObject:peripheral];
+        [peripherals setObject:peripheral forKey:peripheral.identifier];
         [connected addObject:[peripheral asDictionary]];
     }
 
@@ -508,12 +553,19 @@
     NSArray *identifierUUIDStrings = [command argumentAtIndex:0];
     NSArray<NSUUID *> *identifiers = [self uuidStringsToNSUUIDs:identifierUUIDStrings];
 
+    if (identifiers == nil) {
+        NSLog(@"Malformed UUID");
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Malformed UUID"];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+        return;
+    }
+
     NSArray<CBPeripheral *> *foundPeripherals = [manager retrievePeripheralsWithIdentifiers:identifiers];
     // TODO are any of these connected?
     NSMutableArray<NSDictionary *> *found = [NSMutableArray new];
 
     for (CBPeripheral *peripheral in foundPeripherals) {
-        [peripherals addObject:peripheral];   // TODO do we save these?
+        [peripherals setObject:peripheral forKey:peripheral.identifier];
         [found addObject:[peripheral asDictionary]];
     }
 
@@ -526,7 +578,11 @@
 - (void)closeL2Cap:(CDVInvokedUrlCommand*)command {
     NSLog(@"closeL2Cap");
 
-    NSString *uuid = [command argumentAtIndex:0];
+    NSUUID *uuid = [self getUUID:command argumentAtIndex:0];
+    if (uuid == nil) {
+        return;
+    }
+
     NSNumber *psm = [command argumentAtIndex:1];
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
 
@@ -547,7 +603,11 @@
 - (void)openL2Cap:(CDVInvokedUrlCommand*)command {
     NSLog(@"openL2Cap");
 
-    NSString *uuid = [command argumentAtIndex:0];
+    NSUUID *uuid = [self getUUID:command argumentAtIndex:0];
+    if (uuid == nil) {
+        return;
+    }
+
     NSNumber *psm = [command argumentAtIndex:1];
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
 
@@ -567,7 +627,11 @@
 - (void)receiveDataL2Cap:(CDVInvokedUrlCommand*)command {
     NSLog(@"receiveDataL2Cap");
 
-    NSString *uuid = [command argumentAtIndex:0];
+    NSUUID *uuid = [self getUUID:command argumentAtIndex:0];
+    if (uuid == nil) {
+        return;
+    }
+
     NSNumber *psm = [command argumentAtIndex:1];
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
 
@@ -585,7 +649,11 @@
 - (void)writeL2Cap:(CDVInvokedUrlCommand *)command {
     NSLog(@"writeL2Cap");
 
-    NSString *uuid = [command argumentAtIndex:0];
+    NSUUID *uuid = [self getUUID:command argumentAtIndex:0];
+    if (uuid == nil) {
+        return;
+    }
+
     NSNumber *psm = [command argumentAtIndex:1];
     NSData *message = [command argumentAtIndex:2]; // This is binary
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
@@ -612,7 +680,7 @@
 
 - (void)centralManager:(CBCentralManager *)central didDiscoverPeripheral:(CBPeripheral *)peripheral advertisementData:(NSDictionary *)advertisementData RSSI:(NSNumber *)RSSI {
 
-    [peripherals addObject:peripheral];
+    [peripherals setObject:peripheral forKey:peripheral.identifier];
     [peripheral setAdvertisementData:advertisementData RSSI:RSSI];
 
     if (discoverPeripheralCallbackId) {
@@ -628,7 +696,7 @@
 {
     NSLog(@"Status of CoreBluetooth central manager changed %ld %@", (long)central.state, [self centralManagerStateToString: central.state]);
 
-    if (central.state == CBCentralManagerStateUnsupported)
+    if (central.state == CBManagerStateUnsupported)
     {
         NSLog(@"=============================================================");
         NSLog(@"WARNING: This hardware does not support Bluetooth Low Energy.");
@@ -645,17 +713,17 @@
     }
 
     // check and handle disconnected peripherals
-    for (CBPeripheral *peripheral in peripherals) {
+    [peripherals enumerateKeysAndObjectsUsingBlock:^(id key, CBPeripheral* peripheral, BOOL* stop) {
         if (peripheral.state == CBPeripheralStateDisconnected) {
             [self centralManager:central didDisconnectPeripheral:peripheral error:nil];
         }
-    }
+    }];
 
     // @todo - We have discovered that duplicate peripherals can exist so we will remove everything and allow
     // the plugin to repopulate the list - If we do not do this then we could end up with problems finding peripherals
     // that can be connected with but are not able to read from/write to
-    NSLog(@"Removing all objects from peripherals");
-    [peripherals removeAllObjects];
+    // NSLog(@"Removing all objects from peripherals");
+    // [peripherals removeAllObjects];
 }
 
 - (void)centralManager:(CBCentralManager *)central didConnectPeripheral:(CBPeripheral *)peripheral {
@@ -729,6 +797,17 @@
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error {
     NSLog(@"didDiscoverServices");
 
+    if (error) {
+        NSLog(@"%@", error);
+        NSString *connectCallbackId = [connectCallbacks valueForKey:[peripheral uuidAsString]];
+        if (connectCallbackId) {
+            CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
+            [pluginResult setKeepCallbackAsBool:TRUE];
+            [self.commandDelegate sendPluginResult:pluginResult callbackId:connectCallbackId];
+        }
+        return;
+    }
+
     // save the services to tell when all characteristics have been discovered
     NSMutableSet *servicesForPeriperal = [NSMutableSet new];
     [servicesForPeriperal addObjectsFromArray:peripheral.services];
@@ -743,24 +822,38 @@
     NSLog(@"didDiscoverCharacteristicsForService");
 
     NSString *peripheralUUIDString = [peripheral uuidAsString];
-    NSString *connectCallbackId = [connectCallbacks valueForKey:peripheralUUIDString];
-    NSMutableSet *latch = [connectCallbackLatches valueForKey:peripheralUUIDString];
 
-    [latch removeObject:service];
-
-    if ([latch count] == 0) {
-        // Call success callback for connect
+    if (error) {
+        NSLog(@"%@", error);
+        [connectCallbackLatches removeObjectForKey:peripheralUUIDString];
+        NSString *connectCallbackId = [connectCallbacks valueForKey:peripheralUUIDString];
         if (connectCallbackId) {
-            CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[peripheral asDictionary]];
+            CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
             [pluginResult setKeepCallbackAsBool:TRUE];
             [self.commandDelegate sendPluginResult:pluginResult callbackId:connectCallbackId];
         }
-        [connectCallbackLatches removeObjectForKey:peripheralUUIDString];
+        return;
     }
 
     NSLog(@"Found characteristics for service %@", service);
     for (CBCharacteristic *characteristic in service.characteristics) {
         NSLog(@"Characteristic %@", characteristic);
+    }
+
+    NSMutableSet *latch = [connectCallbackLatches valueForKey:peripheralUUIDString];
+    if (latch) {
+        [latch removeObject:service];
+
+        if ([latch count] == 0) {
+            [connectCallbackLatches removeObjectForKey:peripheralUUIDString];
+            // Call success callback for connect
+            NSString *connectCallbackId = [connectCallbacks valueForKey:peripheralUUIDString];
+            if (connectCallbackId) {
+                CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[peripheral asDictionary]];
+                [pluginResult setKeepCallbackAsBool:TRUE];
+                [self.commandDelegate sendPluginResult:pluginResult callbackId:connectCallbackId];
+            }
+        }
     }
 }
 
@@ -933,27 +1026,16 @@
 
 #pragma mark - internal implemetation
 
-- (CBPeripheral*)findPeripheralByUUID:(NSString*)uuid {
-    CBPeripheral *peripheral = nil;
-
-    for (CBPeripheral *p in peripherals) {
-
-        NSString* other = p.identifier.UUIDString;
-
-        if ([uuid isEqualToString:other]) {
-            peripheral = p;
-            break;
-        }
-    }
-    return peripheral;
+- (CBPeripheral*)findPeripheralByUUID:(NSUUID*)uuid {
+    return [peripherals objectForKey:uuid];
 }
 
-- (CBPeripheral*)retrievePeripheralWithUUID:(NSString*)uuid {
-    NSUUID *typedUUID = [[NSUUID alloc] initWithUUIDString:uuid];
+- (CBPeripheral*)retrievePeripheralWithUUID:(NSUUID*)typedUUID {
     NSArray *existingPeripherals = [manager retrievePeripheralsWithIdentifiers:@[typedUUID]];
     CBPeripheral *peripheral = nil;
     if ([existingPeripherals count] > 0) {
         peripheral = [existingPeripherals firstObject];
+        [peripherals setObject:peripheral forKey:peripheral.identifier];
     }
     return peripheral;
 }
@@ -1019,26 +1101,64 @@
         return 0;
 }
 
+-(NSUUID*) getUUID:(CDVInvokedUrlCommand*)command argumentAtIndex:(NSUInteger)index {
+    NSLog(@"getUUID");
+
+    NSString *uuidString = [command argumentAtIndex:index withDefault:@"" andClass:[NSString class]];
+    NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:uuidString];
+    if (uuid == nil) {
+        NSString *errorMessage = [NSString stringWithFormat:@"Malformed UUID: %@", [command argumentAtIndex:index]];
+        NSLog(@"%@", errorMessage);
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMessage];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+        return nil;
+    }
+    return uuid;
+}
+
+-(CBUUID*) getCBUUID:(CDVInvokedUrlCommand*)command argumentAtIndex:(NSUInteger)index {
+    NSLog(@"getCBUUID");
+
+    NSString *uuidString = [command argumentAtIndex:index withDefault:@"" andClass:[NSString class]];
+    CBUUID *uuid = [self uuidStringToCBUUID:uuidString];
+    if (uuid == nil) {
+        NSString *errorMessage = [NSString stringWithFormat:@"Malformed UUID: %@", [command argumentAtIndex:index]];
+        NSLog(@"%@", errorMessage);
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMessage];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+        return nil;
+    }
+    return uuid;
+}
+
 // expecting deviceUUID, serviceUUID, characteristicUUID in command.arguments
 -(BLECommandContext*) getData:(CDVInvokedUrlCommand*)command prop:(CBCharacteristicProperties)prop {
     NSLog(@"getData");
 
     CDVPluginResult *pluginResult = nil;
 
-    NSString *deviceUUIDString = [command argumentAtIndex:0];
-    NSString *serviceUUIDString = [command argumentAtIndex:1];
-    NSString *characteristicUUIDString = [command argumentAtIndex:2];
+    NSUUID *deviceUUID = [self getUUID:command argumentAtIndex:0];
+    if (deviceUUID == nil) {
+        return nil;
+    }
 
-    CBUUID *serviceUUID = [CBUUID UUIDWithString:serviceUUIDString];
-    CBUUID *characteristicUUID = [CBUUID UUIDWithString:characteristicUUIDString];
+    CBUUID *serviceUUID = [self getCBUUID:command argumentAtIndex:1];
+    if (serviceUUID == nil) {
+        return nil;
+    }
 
-    CBPeripheral *peripheral = [self findPeripheralByUUID:deviceUUIDString];
+    CBUUID *characteristicUUID = [self getCBUUID:command argumentAtIndex:2];
+    if (characteristicUUID == nil) {
+        return nil;
+    }
+
+    CBPeripheral *peripheral = [self findPeripheralByUUID:deviceUUID];
 
     if (!peripheral) {
 
-        NSLog(@"Could not find peripheral with UUID %@", deviceUUIDString);
+        NSLog(@"Could not find peripheral with UUID %@", deviceUUID);
 
-        NSString *errorMessage = [NSString stringWithFormat:@"Could not find peripheral with UUID %@", deviceUUIDString];
+        NSString *errorMessage = [NSString stringWithFormat:@"Could not find peripheral with UUID %@", deviceUUID];
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMessage];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 
@@ -1048,24 +1168,18 @@
     CBService *service = [self findServiceFromUUID:serviceUUID p:peripheral];
 
     // If the service was not found, try to retrieve the peripheral from the manager and retry finding the service
-    if (!service)
-    {
+    if (!service) {
         peripheral = [self retrievePeripheralWithUUID:deviceUUIDString];
         [self removePeripheralsWithUUID:deviceUUIDString];
         [peripherals addObject:peripheral];
         service = [self findServiceFromUUID:serviceUUID p:peripheral];
     }
 
-    if (!service)
-    {
-        NSLog(@"Could not find service with UUID %@ on peripheral with UUID %@",
-              serviceUUIDString,
-              peripheral.identifier.UUIDString);
-
-
+    if (!service) {
         NSString *errorMessage = [NSString stringWithFormat:@"Could not find service with UUID %@ on peripheral with UUID %@",
-                                  serviceUUIDString,
+                                  serviceUUID.UUIDString,
                                   peripheral.identifier.UUIDString];
+        NSLog(@"%@", errorMessage);
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMessage];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 
@@ -1084,18 +1198,13 @@
         characteristic = [self findCharacteristicFromUUID:characteristicUUID service:service];
     }
 
-    if (!characteristic)
-    {
-        NSLog(@"Could not find characteristic with UUID %@ on service with UUID %@ on peripheral with UUID %@",
-              characteristicUUIDString,
-              serviceUUIDString,
-              peripheral.identifier.UUIDString);
-
+    if (!characteristic) {
         NSString *errorMessage = [NSString stringWithFormat:
                                   @"Could not find characteristic with UUID %@ on service with UUID %@ on peripheral with UUID %@",
-                                  characteristicUUIDString,
-                                  serviceUUIDString,
+                                  characteristicUUID.UUIDString,
+                                  serviceUUID.UUIDString,
                                   peripheral.identifier.UUIDString];
+        NSLog(@"%@", errorMessage);
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMessage];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 
@@ -1190,21 +1299,21 @@
 
 #pragma mark - util
 
-- (NSString*) centralManagerStateToString: (int)state {
+- (NSString*) centralManagerStateToString: (CBManagerState)state {
     switch(state)
     {
-        case CBCentralManagerStateUnknown:
-            return @"State unknown (CBCentralManagerStateUnknown)";
-        case CBCentralManagerStateResetting:
-            return @"State resetting (CBCentralManagerStateResetting)";
-        case CBCentralManagerStateUnsupported:
-            return @"State BLE unsupported (CBCentralManagerStateUnsupported)";
-        case CBCentralManagerStateUnauthorized:
-            return @"State unauthorized (CBCentralManagerStateUnauthorized)";
-        case CBCentralManagerStatePoweredOff:
-            return @"State BLE powered off (CBCentralManagerStatePoweredOff)";
-        case CBCentralManagerStatePoweredOn:
-            return @"State powered up and ready (CBCentralManagerStatePoweredOn)";
+        case CBManagerStateUnknown:
+            return @"State unknown (CBManagerStateUnknown)";
+        case CBManagerStateResetting:
+            return @"State resetting (CBManagerStateUnknown)";
+        case CBManagerStateUnsupported:
+            return @"State BLE unsupported (CBManagerStateResetting)";
+        case CBManagerStateUnauthorized:
+            return @"State unauthorized (CBManagerStateUnauthorized)";
+        case CBManagerStatePoweredOff:
+            return @"State BLE powered off (CBManagerStatePoweredOff)";
+        case CBManagerStatePoweredOn:
+            return @"State powered up and ready (CBManagerStatePoweredOn)";
         default:
             return @"State unknown";
     }
@@ -1212,10 +1321,38 @@
     return @"Unknown state";
 }
 
+- (CBUUID *) uuidStringToCBUUID: (id)uuidString {
+    if (![uuidString isKindOfClass:[NSString class]]) {
+        NSLog(@"Malformed UUID found: %@", uuidString);
+        return nil;
+    }
+
+    if ([uuidString length] == 4 || [uuidString length] == 8) {
+        // For 16 & 32-bit uuids, attempt to convert directly
+        // This throws an unhandled internal inconsistency error if the format is not right
+        // that will crash the app
+        return [CBUUID UUIDWithString:uuidString];
+    }
+
+    NSUUID *nsuuid = [[NSUUID alloc]initWithUUIDString:uuidString];
+    if (nsuuid == nil) {
+        NSLog(@"Malformed UUID found: %@", uuidString);
+        return nil;
+    }
+
+    return [CBUUID UUIDWithNSUUID:nsuuid];
+}
+
 - (NSArray<CBUUID *> *) uuidStringsToCBUUIDs: (NSArray<NSString *> *)uuidStrings {
     NSMutableArray *uuids = [NSMutableArray new];
     for (int i = 0; i < [uuidStrings count]; i++) {
-        CBUUID *uuid = [CBUUID UUIDWithString:[uuidStrings objectAtIndex: i]];
+        NSString *uuidString = [uuidStrings objectAtIndex: i];
+
+        CBUUID *uuid = [self uuidStringToCBUUID:uuidString];
+        if (uuid == nil) {
+            return nil;
+        }
+
         [uuids addObject:uuid];
     }
     return uuids;
@@ -1224,7 +1361,18 @@
 - (NSArray<NSUUID *> *) uuidStringsToNSUUIDs: (NSArray<NSString *> *)uuidStrings {
     NSMutableArray *uuids = [NSMutableArray new];
     for (int i = 0; i < [uuidStrings count]; i++) {
-        NSUUID *uuid = [[NSUUID alloc]initWithUUIDString:[uuidStrings objectAtIndex: i]];
+        NSString *uuidString = [uuidStrings objectAtIndex: i];
+        if (![uuidString isKindOfClass:[NSString class]]) {
+            NSLog(@"Malformed UUID found: %@", uuidString);
+            return nil;
+        }
+
+        NSUUID *uuid = [[NSUUID alloc]initWithUUIDString:uuidString];
+        if (uuid == nil) {
+            NSLog(@"Malformed UUID found: %@", uuidString);
+            return nil;
+        }
+
         [uuids addObject:uuid];
     }
     return uuids;
