@@ -132,8 +132,10 @@
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
-        // [peripherals addObject:[peripheral asDictionary]];
-        [peripherals setObject:peripheral forKey:peripheral.identifier];
+
+        if (peripheral) {
+            [peripherals setObject:peripheral forKey:peripheral.identifier];
+        }
     }
 
     if (peripheral) {
@@ -172,8 +174,10 @@
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
-        // [peripherals addObject:[peripheral asDictionary]];
-        [peripherals setObject:peripheral forKey:peripheral.identifier];
+
+        if (peripheral) {
+            [peripherals setObject:peripheral forKey:peripheral.identifier];
+        }
     }
 
     if (peripheral) {
@@ -720,12 +724,6 @@
             [self centralManager:central didDisconnectPeripheral:peripheral error:nil];
         }
     }];
-
-    // @todo - We have discovered that duplicate peripherals can exist so we will remove everything and allow
-    // the plugin to repopulate the list - If we do not do this then we could end up with problems finding peripherals
-    // that can be connected with but are not able to read from/write to
-    // NSLog(@"Removing all objects from peripherals");
-    // [peripherals removeAllObjects];
 }
 
 - (void)centralManager:(CBCentralManager *)central didConnectPeripheral:(CBPeripheral *)peripheral {
@@ -733,9 +731,7 @@
 
     peripheral.delegate = self;
 
-    // Remove and re-add the peripheral in case updates from the CBCentralManager do not come with it
-    [self removePeripheralsWithUUID:[peripheral uuidAsString]];
-    // [peripherals addObject:[peripheral asDictionary]];
+    // Overwrite the peripheral in case updates from the CBCentralManager do not come with it
     [peripherals setObject:peripheral forKey:peripheral.identifier];
 
     // NOTE: it's inefficient to discover all services
@@ -1233,20 +1229,6 @@
 +(BOOL) isKey: (NSString *)key forPeripheral:(CBPeripheral *)peripheral {
     NSArray *keyArray = [key componentsSeparatedByString: @"|"];
     return [[peripheral uuidAsString] compare:keyArray[0]] == NSOrderedSame;
-}
-
--(void) removePeripheralsWithUUID:(NSString *)uuid {
-    NSMutableArray *peripheralsToRemove = [NSMutableArray new];
-
-    for (CBPeripheral *peripheral in [peripherals allValues]) {
-        if ([[peripheral uuidAsString] isEqualToString:uuid]) {
-            [peripheralsToRemove addObject:peripheral];
-        }
-    }
-
-    for (CBPeripheral *peripheral in peripheralsToRemove) {
-        [peripherals removeObjectForKey:peripheral.identifier];
-    }
 }
 
 -(void) cleanupOperationCallbacks: (CBPeripheral *)peripheral withResult:(CDVPluginResult *) result {
