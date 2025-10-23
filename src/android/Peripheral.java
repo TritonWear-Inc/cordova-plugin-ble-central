@@ -78,6 +78,7 @@ public class Peripheral extends BluetoothGattCallback {
     private Activity currentActivity;
 
     private final Map<String, SequentialCallbackContext> notificationCallbacks = new HashMap<String, SequentialCallbackContext>();
+    private BLECentralPlugin bleCentralPlugin;
 
     public Peripheral(BluetoothDevice device) {
 
@@ -94,6 +95,10 @@ public class Peripheral extends BluetoothGattCallback {
         this.advertisingRSSI = advertisingRSSI;
         this.advertisingData = scanRecord;
         this.isConnectable = isConnectable;
+    }
+
+    public void setBLECentralPlugin(BLECentralPlugin plugin) {
+        this.bleCentralPlugin = plugin;
     }
 
     @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
@@ -144,6 +149,17 @@ public class Peripheral extends BluetoothGattCallback {
         // don't remove the gatt for autoconnect
         if (!autoconnect) {
             closeGatt();
+        }
+
+        // Handle disconnect completion callback if this was an intentional disconnect
+        if (bleCentralPlugin != null) {
+            CallbackContext disconnectCallback = bleCentralPlugin.getDisconnectCallback(device.getAddress());
+            if (disconnectCallback != null) {
+                bleCentralPlugin.removeDisconnectCallback(device.getAddress());
+                disconnectCallback.success();
+                LOG.d(TAG, "Disconnect completed for peripheral " + device.getAddress());
+                return;
+            }
         }
 
         sendDisconnectMessage(message);

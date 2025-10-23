@@ -126,6 +126,9 @@ public class BLECentralPlugin extends CordovaPlugin {
     // key is the MAC Address
     Map<String, Peripheral> peripherals = new LinkedHashMap<String, Peripheral>();
 
+    // disconnect callbacks - key is MAC Address, value is CallbackContext
+    Map<String, CallbackContext> disconnectCallbacks = new HashMap<String, CallbackContext>();
+
     // scan options
     boolean reportDuplicates = false;
     boolean forceScanFilter = false;
@@ -603,6 +606,7 @@ public class BLECentralPlugin extends CordovaPlugin {
             // just low energy devices (filters out classic and unknown devices)
             if (type == DEVICE_TYPE_LE || type == DEVICE_TYPE_DUAL) {
                 Peripheral p = new Peripheral(device);
+                p.setBLECentralPlugin(this);
                 bonded.put(p.asJSONObject());
             }
         }
@@ -750,11 +754,21 @@ public class BLECentralPlugin extends CordovaPlugin {
         if (!peripherals.containsKey(macAddress) && BluetoothAdapter.checkBluetoothAddress(macAddress)) {
             BluetoothDevice device = BLECentralPlugin.this.bluetoothAdapter.getRemoteDevice(macAddress);
             Peripheral peripheral = new Peripheral(device);
+            peripheral.setBLECentralPlugin(this);
             peripherals.put(macAddress, peripheral);
         }
 
         Peripheral peripheral = peripherals.get(macAddress);
         if (peripheral != null) {
+            // Check if there's a pending disconnect for this peripheral
+            CallbackContext disconnectCallback = disconnectCallbacks.get(macAddress);
+            if (disconnectCallback != null) {
+                String error = "Peripheral " + macAddress + " is currently disconnecting. Please wait for disconnect to complete.";
+                LOG.w(TAG, error);
+                callbackContext.error(error);
+                return;
+            }
+
             // #894: BLE adapter state listener required so disconnect can be fired on BLE disabled
             addStateListener();
             peripheral.connect(callbackContext, cordova.getActivity(), false);
@@ -789,11 +803,21 @@ public class BLECentralPlugin extends CordovaPlugin {
             if (BluetoothAdapter.checkBluetoothAddress(macAddress)) {
                 BluetoothDevice device = bluetoothAdapter.getRemoteDevice(macAddress);
                 peripheral = new Peripheral(device);
+                peripheral.setBLECentralPlugin(this);
                 peripherals.put(device.getAddress(), peripheral);
             } else {
                 callbackContext.error(macAddress + " is not a valid MAC address.");
                 return;
             }
+        }
+
+        // Check if there's a pending disconnect for this peripheral
+        CallbackContext disconnectCallback = disconnectCallbacks.get(macAddress);
+        if (disconnectCallback != null) {
+            String error = "Peripheral " + macAddress + " is currently disconnecting. Please wait for disconnect to complete.";
+            LOG.w(TAG, error);
+            callbackContext.error(error);
+            return;
         }
 
         // #894: BLE adapter state listener required so disconnect can be fired on BLE disabled
@@ -807,8 +831,18 @@ public class BLECentralPlugin extends CordovaPlugin {
 
         Peripheral peripheral = peripherals.get(macAddress);
         if (peripheral != null) {
+            // Check if already disconnected
+            if (!peripheral.isConnected()) {
+                LOG.d(TAG, "Peripheral " + macAddress + " is already disconnected");
+                callbackContext.success();
+                return;
+            }
+
+            // Store the disconnect callback to track completion
+            disconnectCallbacks.put(macAddress, callbackContext);
+
+            // Initiate disconnect - don't return success immediately
             peripheral.disconnect();
-            callbackContext.success();
         } else {
             String message = "Peripheral " + macAddress + " not found.";
             LOG.w(TAG, message);
@@ -891,6 +925,7 @@ public class BLECentralPlugin extends CordovaPlugin {
         if (!peripherals.containsKey(macAddress) && BluetoothAdapter.checkBluetoothAddress(macAddress)) {
             BluetoothDevice device = BLECentralPlugin.this.bluetoothAdapter.getRemoteDevice(macAddress);
             Peripheral peripheral = new Peripheral(device);
+            peripheral.setBLECentralPlugin(this);
             peripherals.put(macAddress, peripheral);
         }
 
@@ -917,6 +952,7 @@ public class BLECentralPlugin extends CordovaPlugin {
         if (!peripherals.containsKey(macAddress) && BluetoothAdapter.checkBluetoothAddress(macAddress)) {
             BluetoothDevice device = BLECentralPlugin.this.bluetoothAdapter.getRemoteDevice(macAddress);
             Peripheral peripheral = new Peripheral(device);
+            peripheral.setBLECentralPlugin(this);
             peripherals.put(macAddress, peripheral);
         }
 
@@ -942,6 +978,7 @@ public class BLECentralPlugin extends CordovaPlugin {
         if (!peripherals.containsKey(macAddress) && BluetoothAdapter.checkBluetoothAddress(macAddress)) {
             BluetoothDevice device = BLECentralPlugin.this.bluetoothAdapter.getRemoteDevice(macAddress);
             Peripheral peripheral = new Peripheral(device);
+            peripheral.setBLECentralPlugin(this);
             peripherals.put(macAddress, peripheral);
         }
 
@@ -1175,6 +1212,7 @@ public class BLECentralPlugin extends CordovaPlugin {
                 }
 
                 Peripheral peripheral = new Peripheral(device, result.getRssi(), result.getScanRecord().getBytes(), isConnectable);
+                peripheral.setBLECentralPlugin(this);
                 peripherals.put(device.getAddress(), peripheral);
 
                 if (discoverCallback != null) {
@@ -1534,6 +1572,15 @@ public class BLECentralPlugin extends CordovaPlugin {
             webView.getContext().unregisterReceiver(bondStateReceiver);
             bondStateReceiver = null;
         }
+    }
+
+    // Helper methods for disconnect callback management
+    public CallbackContext getDisconnectCallback(String macAddress) {
+        return disconnectCallbacks.get(macAddress);
+    }
+
+    public void removeDisconnectCallback(String macAddress) {
+        disconnectCallbacks.remove(macAddress);
     }
 
     @SuppressLint({"UnspecifiedRegisterReceiverFlag", "WrongConstant"})
