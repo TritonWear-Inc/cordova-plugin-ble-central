@@ -1212,7 +1212,7 @@ public class BLECentralPlugin extends CordovaPlugin {
                 }
 
                 Peripheral peripheral = new Peripheral(device, result.getRssi(), result.getScanRecord().getBytes(), isConnectable);
-                peripheral.setBLECentralPlugin(this);
+                peripheral.setBLECentralPlugin(BLECentralPlugin.this);
                 peripherals.put(device.getAddress(), peripheral);
 
                 if (discoverCallback != null) {
