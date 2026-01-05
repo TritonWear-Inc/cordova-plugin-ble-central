@@ -158,11 +158,12 @@ public class Peripheral extends BluetoothGattCallback {
                 bleCentralPlugin.removeDisconnectCallback(device.getAddress());
                 disconnectCallback.success();
                 LOG.d(TAG, "Disconnect completed for peripheral " + device.getAddress());
-                return;
+            } else {
+                sendDisconnectMessage(message);
             }
+        } else {
+            sendDisconnectMessage(message);
         }
-
-        sendDisconnectMessage(message);
 
         queueCleanup(message);
         callbackCleanup(message);
