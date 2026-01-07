@@ -828,9 +828,11 @@ public class BLECentralPlugin extends CordovaPlugin {
 
     @SuppressLint("MissingPermission")
     private void disconnect(CallbackContext callbackContext, String macAddress) {
+        LOG.d(TAG, "disconnect called for " + macAddress);
 
         Peripheral peripheral = peripherals.get(macAddress);
         if (peripheral != null) {
+            LOG.d(TAG, "peripheral found, isConnected=" + peripheral.isConnected());
             // Check if already disconnected
             if (!peripheral.isConnected()) {
                 LOG.d(TAG, "Peripheral " + macAddress + " is already disconnected");
@@ -840,9 +842,11 @@ public class BLECentralPlugin extends CordovaPlugin {
 
             // Store the disconnect callback to track completion
             disconnectCallbacks.put(macAddress, callbackContext);
+            LOG.d(TAG, "stored disconnect callback for " + macAddress);
 
             // Initiate disconnect - don't return success immediately
             peripheral.disconnect();
+            LOG.d(TAG, "peripheral.disconnect() called");
         } else {
             String message = "Peripheral " + macAddress + " not found.";
             LOG.w(TAG, message);

@@ -127,22 +127,32 @@ public class Peripheral extends BluetoothGattCallback {
     }
 
     // the app requested the central disconnect from the peripheral
-    // disconnect the gatt, do not call connectCallback.error
+    // only initiate the disconnect - wait for onConnectionStateChange callback
+    // to confirm disconnect before calling the disconnect callback
     @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
     public void disconnect() {
-        connected = false;
-        connecting = false;
+        LOG.d(TAG, "disconnect() called for " + device.getAddress());
         autoconnect = false;
 
-        closeGatt();
-        queueCleanup("Central disconnected");
-        callbackCleanup("Central disconnected");
+        // Only call gatt.disconnect(), NOT gatt.close()
+        // This allows onConnectionStateChange to fire with STATE_DISCONNECTED
+        // peripheralDisconnected() will handle the callback and cleanup
+        BluetoothGatt localGatt = this.gatt;
+        if (localGatt != null) {
+            LOG.d(TAG, "calling gatt.disconnect() for " + device.getAddress());
+            localGatt.disconnect();
+        } else {
+            LOG.d(TAG, "gatt is null, calling peripheralDisconnected directly");
+            // If GATT is already null, we're already disconnected
+            peripheralDisconnected("Already disconnected");
+        }
     }
 
     // the peripheral disconnected
     // always call connectCallback.error to notify the app
     @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
     public void peripheralDisconnected(String message) {
+        LOG.d(TAG, "peripheralDisconnected called with message: " + message);
         connected = false;
         connecting = false;
 
@@ -152,8 +162,10 @@ public class Peripheral extends BluetoothGattCallback {
         }
 
         // Handle disconnect completion callback if this was an intentional disconnect
+        LOG.d(TAG, "bleCentralPlugin is " + (bleCentralPlugin != null ? "not null" : "null"));
         if (bleCentralPlugin != null) {
             CallbackContext disconnectCallback = bleCentralPlugin.getDisconnectCallback(device.getAddress());
+            LOG.d(TAG, "disconnectCallback is " + (disconnectCallback != null ? "not null" : "null"));
             if (disconnectCallback != null) {
                 bleCentralPlugin.removeDisconnectCallback(device.getAddress());
                 disconnectCallback.success();
