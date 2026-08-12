@@ -25,6 +25,8 @@
 - (CBPeripheral *)findPeripheralByUUID:(NSUUID *)uuid;
 - (CBPeripheral *)retrievePeripheralWithUUID:(NSUUID *)uuid;
 - (void)stopScanTimer:(NSTimer *)timer;
+- (void)reseatPeripheralsAfterStackRestart;
+- (void)failPendingCallbacksForPeripheral:(CBPeripheral *)peripheral reason:(NSString *)reason;
 @end
 
 @implementation BLECentralPlugin
@@ -748,12 +750,86 @@
         [self.commandDelegate sendPluginResult:pluginResult callbackId:stateCallbackId];
     }
 
+    // must run before the sweep below, which reads peripheral.state
+    if (central.state == CBManagerStatePoweredOn) {
+        [self reseatPeripheralsAfterStackRestart];
+    }
+
     // check and handle disconnected peripherals
     [peripherals enumerateKeysAndObjectsUsingBlock:^(id key, CBPeripheral* peripheral, BOOL* stop) {
         if (peripheral.state == CBPeripheralStateDisconnected) {
             [self centralManager:central didDisconnectPeripheral:peripheral error:nil];
         }
     }];
+}
+
+// When the Bluetooth stack restarts, CoreBluetooth abandons every CBPeripheral it handed
+// out beforehand. Those objects deliver no further delegate callbacks and their state keeps
+// reporting whatever it last held, so connecting to one hangs with no callback of any kind.
+// Swap each cached peripheral for a fresh handle and release anything parked on the old one.
+- (void)reseatPeripheralsAfterStackRestart {
+    if ([peripherals count] == 0) {
+        return;
+    }
+
+    NSArray<NSUUID *> *identifiers = [peripherals allKeys];
+    NSArray<CBPeripheral *> *refreshed = [manager retrievePeripheralsWithIdentifiers:identifiers];
+
+    NSMutableDictionary *replacements = [NSMutableDictionary dictionaryWithCapacity:[refreshed count]];
+    for (CBPeripheral *peripheral in refreshed) {
+        [replacements setObject:peripheral forKey:peripheral.identifier];
+    }
+
+    for (NSUUID *identifier in identifiers) {
+        CBPeripheral *cached = [peripherals objectForKey:identifier];
+        CBPeripheral *fresh = [replacements objectForKey:identifier];
+
+        // CoreBluetooth returns the same instance for peripherals that survived the restart
+        if (fresh == cached) {
+            continue;
+        }
+
+        NSLog(@"Peripheral %@ was invalidated by a Bluetooth stack restart", [cached uuidAsString]);
+        [self failPendingCallbacksForPeripheral:cached reason:@"Bluetooth stack reset"];
+
+        if (fresh) {
+            [peripherals setObject:fresh forKey:identifier];
+        } else {
+            [peripherals removeObjectForKey:identifier];
+        }
+    }
+}
+
+// Release every callback parked on a peripheral, so no caller is left waiting on a delegate
+// callback that will never arrive. Mirrors the cleanup in didDisconnectPeripheral.
+- (void)failPendingCallbacksForPeripheral:(CBPeripheral *)peripheral reason:(NSString *)reason {
+    NSString *peripheralUUID = [peripheral uuidAsString];
+    NSString *connectCallbackId = [connectCallbacks valueForKey:peripheralUUID];
+    NSString *disconnectCallbackId = [disconnectCallbacks valueForKey:peripheralUUID];
+
+    [connectCallbacks removeObjectForKey:peripheralUUID];
+    [disconnectCallbacks removeObjectForKey:peripheralUUID];
+    [self cleanupOperationCallbacks:peripheral withResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:reason]];
+
+    // the link is gone either way, so a pending disconnect has got what it asked for
+    if (disconnectCallbackId) {
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:disconnectCallbackId];
+        NSLog(@"Disconnect completed for peripheral %@ (%@)", peripheralUUID, reason);
+    }
+
+    if (connectCallbackId) {
+        NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:[peripheral asDictionary]];
+
+        [dict setObject:@"Peripheral Disconnected" forKey:@"errorMessage"];
+        [dict setObject:reason forKey:@"errorDescription"];
+        [dict removeObjectForKey:@"rssi"];
+        [dict removeObjectForKey:@"advertising"];
+        [dict removeObjectForKey:@"services"];
+
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:dict];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:connectCallbackId];
+    }
 }
 
 - (void)centralManager:(CBCentralManager *)central didConnectPeripheral:(CBPeripheral *)peripheral {
