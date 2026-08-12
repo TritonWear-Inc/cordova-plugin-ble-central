@@ -247,7 +247,24 @@
         // Store the disconnect callback to track completion
         [disconnectCallbacks setObject:[command.callbackId copy] forKey:[peripheral uuidAsString]];
 
-        [connectCallbacks removeObjectForKey:uuid];
+        // Cancel any in-flight connect for this peripheral. connectCallbacks is keyed by uuidAsString
+        // everywhere else; the previous removeObjectForKey:uuid passed the NSUUID and silently no-opped,
+        // so a pending connect survived the disconnect and later received a generic "Peripheral
+        // Disconnected" from didDisconnectPeripheral, indistinguishable from a real peer drop. Fail it
+        // here with a distinct message so callers can tell a disconnect-initiated cancel from a dropped
+        // unit, and so the connect promise settles now instead of hanging until the JS-side timeout.
+        NSString *pendingConnectCallbackId = [connectCallbacks valueForKey:[peripheral uuidAsString]];
+        if (pendingConnectCallbackId) {
+            [connectCallbacks removeObjectForKey:[peripheral uuidAsString]];
+            NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:[peripheral asDictionary]];
+            [dict setObject:@"Connection cancelled" forKey:@"errorMessage"];
+            [dict setObject:@"Connect aborted by a disconnect request" forKey:@"errorDescription"];
+            [dict removeObjectForKey:@"rssi"];
+            [dict removeObjectForKey:@"advertising"];
+            [dict removeObjectForKey:@"services"];
+            CDVPluginResult *connectResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:dict];
+            [self.commandDelegate sendPluginResult:connectResult callbackId:pendingConnectCallbackId];
+        }
         [self cleanupOperationCallbacks:peripheral withResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Peripheral disconnected"]];
 
         if (peripheral && peripheral.state != CBPeripheralStateDisconnected) {
