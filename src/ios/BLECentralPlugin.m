@@ -31,7 +31,7 @@
 
 @implementation BLECentralPlugin
 
-@synthesize manager;
+@synthesize manager = _manager;
 @synthesize peripherals;
 
 - (void)pluginInitialize {
@@ -40,20 +40,7 @@
 
     [super pluginInitialize];
 
-    NSMutableDictionary *options = [[NSMutableDictionary alloc] init];
-    options[CBCentralManagerOptionShowPowerAlertKey] = @NO;
-
-    NSDictionary *pluginSettings = [[self commandDelegate] settings];
-    NSString *enableState = pluginSettings[@"bluetooth_restore_state"];
-    if (![self isFalsey:enableState]) {
-        NSString *restoreIdentifier = [@"true" isEqualToString:[enableState lowercaseString]]
-            ? [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleIdentifier"]
-            : enableState;
-        options[CBCentralManagerOptionRestoreIdentifierKey] = restoreIdentifier;
-    }
-
     peripherals = [NSMutableDictionary new];
-    manager = [[CBCentralManager alloc] initWithDelegate:self queue:nil options:options];
 
     restoredState = nil;
     connectCallbacks = [NSMutableDictionary new];
@@ -74,6 +61,40 @@
                        @"on", @(CBManagerStatePoweredOn),
                        nil];
     readRSSICallbacks = [NSMutableDictionary new];
+
+    // State restoration is handed to the delegate during launch, so it is the one configuration
+    // that still needs the manager this early. Every other setup waits for the first real
+    // Bluetooth call, because constructing the manager is what shows the permission prompt.
+    if (![self isFalsey:[[self commandDelegate] settings][@"bluetooth_restore_state"]]) {
+        [self manager];
+    }
+}
+
+- (NSDictionary *)centralManagerOptions {
+    NSMutableDictionary *options = [[NSMutableDictionary alloc] init];
+    options[CBCentralManagerOptionShowPowerAlertKey] = @NO;
+
+    NSDictionary *pluginSettings = [[self commandDelegate] settings];
+    NSString *enableState = pluginSettings[@"bluetooth_restore_state"];
+    if (![self isFalsey:enableState]) {
+        NSString *restoreIdentifier = [@"true" isEqualToString:[enableState lowercaseString]]
+            ? [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleIdentifier"]
+            : enableState;
+        options[CBCentralManagerOptionRestoreIdentifierKey] = restoreIdentifier;
+    }
+
+    return options;
+}
+
+// Built on first use rather than at plugin load. On iOS, constructing a CBCentralManager is
+// itself the permission prompt, so an action that does not need the radio must not reach this.
+// Cordova dispatches every action on one thread, so the check needs no lock.
+- (CBCentralManager *)manager {
+    if (_manager == nil) {
+        _manager = [[CBCentralManager alloc] initWithDelegate:self queue:nil options:[self centralManagerOptions]];
+    }
+
+    return _manager;
 }
 
 #pragma mark - Cordova Plugin Methods
@@ -118,7 +139,7 @@
 
 - (void)connect:(CDVInvokedUrlCommand *)command {
     NSLog(@"connect");
-    if ([manager state] != CBManagerStatePoweredOn) {
+    if ([self.manager state] != CBManagerStatePoweredOn) {
         NSString *error = @"Bluetooth is disabled";
         NSLog(@"%@", error);
         CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
@@ -155,7 +176,7 @@
         NSLog(@"Connecting to peripheral with UUID : %@", uuid);
 
         [connectCallbacks setObject:[command.callbackId copy] forKey:[peripheral uuidAsString]];
-        [manager connectPeripheral:peripheral options:nil];
+        [self.manager connectPeripheral:peripheral options:nil];
     } else {
         NSString *error = [NSString stringWithFormat:@"Could not find peripheral %@.", uuid];
         NSLog(@"%@", error);
@@ -170,7 +191,7 @@
 // If not scanning, try connectedPeripheralsWIthServices or peripheralsWithIdentifiers
 - (void)autoConnect:(CDVInvokedUrlCommand *)command {
     NSLog(@"autoConnect");
-    if ([manager state] != CBManagerStatePoweredOn) {
+    if ([self.manager state] != CBManagerStatePoweredOn) {
         NSString *error = @"Bluetooth is disabled";
         NSLog(@"%@", error);
         CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
@@ -207,7 +228,7 @@
         NSLog(@"Autoconnecting to peripheral with UUID : %@", uuid);
 
         [connectCallbacks setObject:[command.callbackId copy] forKey:[peripheral uuidAsString]];
-        [manager connectPeripheral:peripheral options:nil];
+        [self.manager connectPeripheral:peripheral options:nil];
     } else {
         NSString *error = [NSString stringWithFormat:@"Could not find peripheral %@.", uuid];
         NSLog(@"%@", error);
@@ -268,7 +289,7 @@
         [self cleanupOperationCallbacks:peripheral withResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Peripheral disconnected"]];
 
         if (peripheral && peripheral.state != CBPeripheralStateDisconnected) {
-            [manager cancelPeripheralConnection:peripheral];
+            [self.manager cancelPeripheralConnection:peripheral];
         }
 
         // Don't return success immediately - wait for didDisconnectPeripheral callback
@@ -408,9 +429,34 @@
     }
 }
 
+// Answers without constructing a central manager, which is the only way to ask the OS without
+// also asking the user. CBManager.authorization is a class property as of iOS 13.1, and its
+// documentation calls out checking the status before allocating a CBManager.
+- (void)bluetoothAuthorization:(CDVInvokedUrlCommand *)command {
+    NSString *authorization;
+
+    switch ([CBManager authorization]) {
+        case CBManagerAuthorizationAllowedAlways:
+            authorization = @"authorized";
+            break;
+        case CBManagerAuthorizationDenied:
+            authorization = @"denied";
+            break;
+        case CBManagerAuthorizationRestricted:
+            authorization = @"restricted";
+            break;
+        default:
+            authorization = @"notDetermined";
+            break;
+    }
+
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:authorization];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+}
+
 - (void)isEnabled:(CDVInvokedUrlCommand*)command {
     CDVPluginResult *pluginResult = nil;
-    CBManagerState bluetoothState = [manager state];
+    CBManagerState bluetoothState = [self.manager state];
 
     BOOL enabled = bluetoothState == CBManagerStatePoweredOn;
 
@@ -424,7 +470,7 @@
 
 - (void)startScanWithOptions:(CDVInvokedUrlCommand*)command {
     NSLog(@"startScanWithOptions");
-    if ([manager state] != CBManagerStatePoweredOn) {
+    if ([self.manager state] != CBManagerStatePoweredOn) {
         NSString *error = @"Bluetooth is disabled";
         NSLog(@"%@", error);
         CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
@@ -460,7 +506,7 @@
     }
     NSNumber *timeoutSeconds = [options valueForKey: @"duration"];
 
-    [manager scanForPeripheralsWithServices:serviceUUIDs options:scanOptions];
+    [self.manager scanForPeripheralsWithServices:serviceUUIDs options:scanOptions];
 
     [scanTimer invalidate];
     scanTimer = nil;
@@ -507,7 +553,7 @@
 
     if (stateCallbackId == nil) {
         stateCallbackId = [command.callbackId copy];
-        CBManagerState bluetoothState = [manager state];
+        CBManagerState bluetoothState = [self.manager state];
         NSString *state = [bluetoothStates objectForKey:@(bluetoothState)];
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:state];
         [pluginResult setKeepCallbackAsBool:TRUE];
@@ -562,7 +608,7 @@
 // https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/1518924-retrieveconnectedperipheralswith?language=objc
 - (void)connectedPeripheralsWithServices:(CDVInvokedUrlCommand*)command {
     NSLog(@"connectedPeripheralsWithServices");
-    if ([manager state] != CBManagerStatePoweredOn) {
+    if ([self.manager state] != CBManagerStatePoweredOn) {
         NSString *error = @"Bluetooth is disabled";
         NSLog(@"%@", error);
         CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
@@ -587,7 +633,7 @@
         return;
     }
 
-    NSArray<CBPeripheral *> *connectedPeripherals = [manager retrieveConnectedPeripheralsWithServices:serviceUUIDs];
+    NSArray<CBPeripheral *> *connectedPeripherals = [self.manager retrieveConnectedPeripheralsWithServices:serviceUUIDs];
     NSMutableArray<NSDictionary *> *connected = [NSMutableArray new];
 
     for (CBPeripheral *peripheral in connectedPeripherals) {
@@ -615,7 +661,7 @@
         return;
     }
 
-    NSArray<CBPeripheral *> *foundPeripherals = [manager retrievePeripheralsWithIdentifiers:identifiers];
+    NSArray<CBPeripheral *> *foundPeripherals = [self.manager retrievePeripheralsWithIdentifiers:identifiers];
     // TODO are any of these connected?
     NSMutableArray<NSDictionary *> *found = [NSMutableArray new];
 
@@ -790,7 +836,7 @@
     }
 
     NSArray<NSUUID *> *identifiers = [peripherals allKeys];
-    NSArray<CBPeripheral *> *refreshed = [manager retrievePeripheralsWithIdentifiers:identifiers];
+    NSArray<CBPeripheral *> *refreshed = [self.manager retrievePeripheralsWithIdentifiers:identifiers];
 
     NSMutableDictionary *replacements = [NSMutableDictionary dictionaryWithCapacity:[refreshed count]];
     for (CBPeripheral *peripheral in refreshed) {
@@ -1179,7 +1225,7 @@
 }
 
 - (CBPeripheral*)retrievePeripheralWithUUID:(NSUUID*)typedUUID {
-    NSArray *existingPeripherals = [manager retrievePeripheralsWithIdentifiers:@[typedUUID]];
+    NSArray *existingPeripherals = [self.manager retrievePeripheralsWithIdentifiers:@[typedUUID]];
     CBPeripheral *peripheral = nil;
     if ([existingPeripherals count] > 0) {
         peripheral = [existingPeripherals firstObject];
@@ -1530,8 +1576,8 @@
     [scanTimer invalidate];
     scanTimer = nil;
 
-    if ([manager state] == CBManagerStatePoweredOn) {
-        [manager stopScan];
+    if (_manager != nil && [_manager state] == CBManagerStatePoweredOn) {
+        [_manager stopScan];
     }
 
     if (discoverPeripheralCallbackId) {
