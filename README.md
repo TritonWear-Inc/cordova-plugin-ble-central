@@ -133,6 +133,7 @@ For the best understanding about which permissions are needed for which combinat
 -   [ble.stopNotification](#stopnotification)
 -   [ble.isConnected](#isconnected)
 -   [ble.isEnabled](#isenabled)
+-   [ble.bluetoothAuthorization](#bluetoothauthorization)
 -   [ble.isLocationEnabled](#islocationenabled)
 -   [ble.startLocationStateNotifications](#startlocationstatenotifications)
 -   [ble.stopLocationStateNotifications](#stoplocationstatenotifications)
@@ -919,6 +920,43 @@ ble.isEnabled(
         console.log('Bluetooth is *not* enabled');
     }
 );
+```
+
+## bluetoothAuthorization
+
+Reports the Bluetooth permission without asking the user for it.
+
+```javascript
+ble.bluetoothAuthorization(success, failure);
+```
+
+### Description
+
+Function `bluetoothAuthorization` calls the success callback with the current permission as a
+string: `authorized`, `denied`, `restricted` or `notDetermined`.
+
+Unlike every other call in this plugin, this one is safe to make before you have decided to prompt.
+On iOS it reads `CBManager.authorization`, a class property, and never constructs the central
+manager, which is the thing that shows the permission dialog. Use it to skip an ask the user has
+already answered, or to tell a refusal apart from a switched-off radio.
+
+On Android only `authorized` and `notDetermined` are reported, because a permission Android has not
+granted reads the same whether the user refused it or was never asked. The permissions it checks
+are the ones a scan requires on that API level, so its answer matches what `startScan` would demand.
+
+### Parameters
+
+-   **success**: Success callback function, invoked with the authorization string.
+-   **failure**: Error callback function, invoked when the device has no Bluetooth LE support.
+
+### Quick Example
+
+```javascript
+ble.bluetoothAuthorization(function (authorization) {
+    if (authorization === 'notDetermined') {
+        // the prompt is unspent, so our own explanation is still worth showing
+    }
+});
 ```
 
 ## isLocationEnabled
