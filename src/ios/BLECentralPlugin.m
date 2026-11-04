@@ -1446,14 +1446,6 @@
 
     CBService *service = [self findServiceFromUUID:serviceUUID p:peripheral];
 
-    // If the service was not found, try to retrieve the peripheral from the manager and retry finding the service
-    // if (!service) {
-        // peripheral = [self retrievePeripheralWithUUID:deviceUUIDString];
-        // [self removePeripheralsWithUUID:deviceUUIDString];
-        // [peripherals addObject:peripheral];
-        // service = [self findServiceFromUUID:serviceUUID p:peripheral];
-    // }
-
     if (!service) {
         NSString *errorMessage = [NSString stringWithFormat:@"Could not find service with UUID %@ on peripheral with UUID %@",
                                   serviceUUID.UUIDString,
