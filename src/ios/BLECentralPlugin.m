@@ -52,6 +52,7 @@
     startNotificationCallbacks = [NSMutableDictionary new];
     stopNotificationCallbacks = [NSMutableDictionary new];
     l2CapContexts = [NSMutableDictionary new];
+    pendingManagerStateCommands = [NSMutableArray new];
     bluetoothStates = [NSDictionary dictionaryWithObjectsAndKeys:
                        @"unknown", @(CBManagerStateUnknown),
                        @"resetting", @(CBManagerStateResetting),
@@ -97,6 +98,34 @@
     return _manager;
 }
 
+// Constructing the central manager is asynchronous: until centralManagerDidUpdateState arrives its
+// state reads CBManagerStateUnknown, so an action that ran straight after construction would decide
+// Bluetooth was off while the radio was on. Hold the action instead and run it once the state is
+// real. Returns YES when the caller was deferred and must do nothing further.
+- (BOOL)deferUntilManagerStateIsKnown:(void (^)(void))action {
+    if ([self.manager state] != CBManagerStateUnknown) {
+        return NO;
+    }
+
+    NSLog(@"Waiting for the central manager state before running the requested action");
+    [pendingManagerStateCommands addObject:[action copy]];
+
+    return YES;
+}
+
+- (void)runPendingManagerStateCommands {
+    if ([pendingManagerStateCommands count] == 0) {
+        return;
+    }
+
+    NSArray<void (^)(void)> *actions = [pendingManagerStateCommands copy];
+    [pendingManagerStateCommands removeAllObjects];
+
+    for (void (^action)(void) in actions) {
+        action();
+    }
+}
+
 #pragma mark - Cordova Plugin Methods
 
 - (void)centralManager:(CBCentralManager *)central willRestoreState:(NSDictionary<NSString *,id> *)state {
@@ -139,6 +168,10 @@
 
 - (void)connect:(CDVInvokedUrlCommand *)command {
     NSLog(@"connect");
+    if ([self deferUntilManagerStateIsKnown:^{ [self connect:command]; }]) {
+        return;
+    }
+
     if ([self.manager state] != CBManagerStatePoweredOn) {
         NSString *error = @"Bluetooth is disabled";
         NSLog(@"%@", error);
@@ -191,6 +224,10 @@
 // If not scanning, try connectedPeripheralsWIthServices or peripheralsWithIdentifiers
 - (void)autoConnect:(CDVInvokedUrlCommand *)command {
     NSLog(@"autoConnect");
+    if ([self deferUntilManagerStateIsKnown:^{ [self autoConnect:command]; }]) {
+        return;
+    }
+
     if ([self.manager state] != CBManagerStatePoweredOn) {
         NSString *error = @"Bluetooth is disabled";
         NSLog(@"%@", error);
@@ -460,6 +497,10 @@
 }
 
 - (void)isEnabled:(CDVInvokedUrlCommand*)command {
+    if ([self deferUntilManagerStateIsKnown:^{ [self isEnabled:command]; }]) {
+        return;
+    }
+
     CDVPluginResult *pluginResult = nil;
     CBManagerState bluetoothState = [self.manager state];
 
@@ -475,6 +516,10 @@
 
 - (void)startScanWithOptions:(CDVInvokedUrlCommand*)command {
     NSLog(@"startScanWithOptions");
+    if ([self deferUntilManagerStateIsKnown:^{ [self startScanWithOptions:command]; }]) {
+        return;
+    }
+
     if ([self.manager state] != CBManagerStatePoweredOn) {
         NSString *error = @"Bluetooth is disabled";
         NSLog(@"%@", error);
@@ -613,6 +658,10 @@
 // https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/1518924-retrieveconnectedperipheralswith?language=objc
 - (void)connectedPeripheralsWithServices:(CDVInvokedUrlCommand*)command {
     NSLog(@"connectedPeripheralsWithServices");
+    if ([self deferUntilManagerStateIsKnown:^{ [self connectedPeripheralsWithServices:command]; }]) {
+        return;
+    }
+
     if ([self.manager state] != CBManagerStatePoweredOn) {
         NSString *error = @"Bluetooth is disabled";
         NSLog(@"%@", error);
@@ -656,6 +705,10 @@
 // https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/1519127-retrieveperipheralswithidentifie?language=objc
 - (void)peripheralsWithIdentifiers:(CDVInvokedUrlCommand*)command {
     NSLog(@"peripheralsWithIdentifiers");
+    if ([self deferUntilManagerStateIsKnown:^{ [self peripheralsWithIdentifiers:command]; }]) {
+        return;
+    }
+
     NSArray *identifierUUIDStrings = [command argumentAtIndex:0];
     NSArray<NSUUID *> *identifiers = [self uuidStringsToNSUUIDs:identifierUUIDStrings];
 
@@ -829,6 +882,12 @@
             [self centralManager:central didDisconnectPeripheral:peripheral error:nil];
         }
     }];
+
+    // Last, so anything held while the state was unknown starts from the swept state rather than
+    // racing the cleanup above. Any state but unknown is an answer, including off and unauthorized.
+    if (central.state != CBManagerStateUnknown) {
+        [self runPendingManagerStateCommands];
+    }
 }
 
 // When the Bluetooth stack restarts, CoreBluetooth abandons every CBPeripheral it handed
