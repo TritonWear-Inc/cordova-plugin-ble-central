@@ -78,27 +78,29 @@ public class Peripheral extends BluetoothGattCallback {
     private Activity currentActivity;
 
     private final Map<String, SequentialCallbackContext> notificationCallbacks = new HashMap<String, SequentialCallbackContext>();
-    private BLECentralPlugin bleCentralPlugin;
 
-    public Peripheral(BluetoothDevice device) {
+    // Taken in the constructor rather than set afterwards: peripheralDisconnected answers the
+    // pending disconnect through it, and a construction site that forgot to pass it would drop
+    // that answer silently.
+    private final BLECentralPlugin bleCentralPlugin;
+
+    public Peripheral(BLECentralPlugin bleCentralPlugin, BluetoothDevice device) {
 
         LOG.d(TAG, "Creating un-scanned peripheral entry for address: %s", device.getAddress());
 
+        this.bleCentralPlugin = bleCentralPlugin;
         this.device = device;
         this.advertisingRSSI = FAKE_PERIPHERAL_RSSI;
         this.advertisingData = null;
 
     }
 
-    public Peripheral(BluetoothDevice device, int advertisingRSSI, byte[] scanRecord, Boolean isConnectable) {
+    public Peripheral(BLECentralPlugin bleCentralPlugin, BluetoothDevice device, int advertisingRSSI, byte[] scanRecord, Boolean isConnectable) {
+        this.bleCentralPlugin = bleCentralPlugin;
         this.device = device;
         this.advertisingRSSI = advertisingRSSI;
         this.advertisingData = scanRecord;
         this.isConnectable = isConnectable;
-    }
-
-    public void setBLECentralPlugin(BLECentralPlugin plugin) {
-        this.bleCentralPlugin = plugin;
     }
 
     @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
@@ -131,28 +133,36 @@ public class Peripheral extends BluetoothGattCallback {
     // to confirm disconnect before calling the disconnect callback
     @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
     public void disconnect() {
-        LOG.d(TAG, "disconnect() called for " + device.getAddress());
         autoconnect = false;
 
-        // Only call gatt.disconnect(), NOT gatt.close()
-        // This allows onConnectionStateChange to fire with STATE_DISCONNECTED
-        // peripheralDisconnected() will handle the callback and cleanup
         BluetoothGatt localGatt = this.gatt;
-        if (localGatt != null) {
-            LOG.d(TAG, "calling gatt.disconnect() for " + device.getAddress());
-            localGatt.disconnect();
-        } else {
-            LOG.d(TAG, "gatt is null, calling peripheralDisconnected directly");
-            // If GATT is already null, we're already disconnected
+
+        if (localGatt == null) {
+            // Nothing is open, so no callback is coming to settle the request.
             peripheralDisconnected("Already disconnected");
+            return;
         }
+
+        // Only an established link reports back through onConnectionStateChange. Cancelling a
+        // connect that never completed can report nothing at all, which would strand the disconnect
+        // request and leak the GATT client against Android's per-app limit. Settle that case here.
+        if (!connected) {
+            localGatt.disconnect();
+            peripheralDisconnected("Connect aborted by a disconnect request");
+            return;
+        }
+
+        // Deliberately gatt.disconnect() and not closeGatt(): closing now would suppress the
+        // onConnectionStateChange that peripheralDisconnected answers the caller from.
+        localGatt.disconnect();
     }
 
     // the peripheral disconnected
     // always call connectCallback.error to notify the app
     @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
     public void peripheralDisconnected(String message) {
-        LOG.d(TAG, "peripheralDisconnected called with message: " + message);
+        boolean abortedConnect = connecting && !connected;
+
         connected = false;
         connecting = false;
 
@@ -161,20 +171,24 @@ public class Peripheral extends BluetoothGattCallback {
             closeGatt();
         }
 
-        // Handle disconnect completion callback if this was an intentional disconnect
-        LOG.d(TAG, "bleCentralPlugin is " + (bleCentralPlugin != null ? "not null" : "null"));
-        if (bleCentralPlugin != null) {
-            CallbackContext disconnectCallback = bleCentralPlugin.getDisconnectCallback(device.getAddress());
-            LOG.d(TAG, "disconnectCallback is " + (disconnectCallback != null ? "not null" : "null"));
-            if (disconnectCallback != null) {
-                bleCentralPlugin.removeDisconnectCallback(device.getAddress());
-                disconnectCallback.success();
-                LOG.d(TAG, "Disconnect completed for peripheral " + device.getAddress());
-            } else {
-                sendDisconnectMessage(message);
-            }
-        } else {
+        CallbackContext disconnectCallback = bleCentralPlugin.getDisconnectCallback(device.getAddress());
+
+        if (disconnectCallback == null) {
             sendDisconnectMessage(message);
+        } else {
+            bleCentralPlugin.removeDisconnectCallback(device.getAddress());
+            disconnectCallback.success();
+            LOG.d(TAG, "Disconnect completed for peripheral " + device.getAddress());
+
+            if (abortedConnect) {
+                // The cancelled connect is still owed an answer, and it has to read differently
+                // from a peer drop so the caller can tell a cancel from a unit going away.
+                sendDisconnectMessage("Connect aborted by a disconnect request");
+            } else {
+                // A disconnect the caller asked for is not a connect failure, so connect's error
+                // callback stays silent. Release it so the next connect starts from nothing.
+                connectCallback = null;
+            }
         }
 
         queueCleanup(message);
