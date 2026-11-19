@@ -75,28 +75,22 @@ public class Peripheral extends BluetoothGattCallback {
     private CallbackContext writeCallback;
     private CallbackContext requestMtuCallback;
     private CallbackContext bondStateCallback;
+    private CallbackContext disconnectCallback;
     private Activity currentActivity;
 
     private final Map<String, SequentialCallbackContext> notificationCallbacks = new HashMap<String, SequentialCallbackContext>();
 
-    // Taken in the constructor rather than set afterwards: peripheralDisconnected answers the
-    // pending disconnect through it, and a construction site that forgot to pass it would drop
-    // that answer silently.
-    private final BLECentralPlugin bleCentralPlugin;
-
-    public Peripheral(BLECentralPlugin bleCentralPlugin, BluetoothDevice device) {
+    public Peripheral(BluetoothDevice device) {
 
         LOG.d(TAG, "Creating un-scanned peripheral entry for address: %s", device.getAddress());
 
-        this.bleCentralPlugin = bleCentralPlugin;
         this.device = device;
         this.advertisingRSSI = FAKE_PERIPHERAL_RSSI;
         this.advertisingData = null;
 
     }
 
-    public Peripheral(BLECentralPlugin bleCentralPlugin, BluetoothDevice device, int advertisingRSSI, byte[] scanRecord, Boolean isConnectable) {
-        this.bleCentralPlugin = bleCentralPlugin;
+    public Peripheral(BluetoothDevice device, int advertisingRSSI, byte[] scanRecord, Boolean isConnectable) {
         this.device = device;
         this.advertisingRSSI = advertisingRSSI;
         this.advertisingData = scanRecord;
@@ -129,31 +123,50 @@ public class Peripheral extends BluetoothGattCallback {
     }
 
     // the app requested the central disconnect from the peripheral
-    // only initiate the disconnect - wait for onConnectionStateChange callback
-    // to confirm disconnect before calling the disconnect callback
+    // disconnect the gatt, do not call connectCallback.error
     @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
     public void disconnect() {
+        connected = false;
+        connecting = false;
         autoconnect = false;
 
-        BluetoothGatt localGatt = this.gatt;
+        closeGatt();
+        queueCleanup("Central disconnected");
+        callbackCleanup("Central disconnected");
+    }
+
+    // as above, but reports back once the link is really down
+    @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
+    public void disconnect(CallbackContext callbackContext) {
+        BluetoothGatt localGatt;
+
+        synchronized (this) {
+            if (disconnectCallback != null) {
+                callbackContext.error("Peripheral " + device.getAddress() + " is already disconnecting.");
+                return;
+            }
+
+            disconnectCallback = callbackContext;
+            localGatt = this.gatt;
+        }
+
+        autoconnect = false;
 
         if (localGatt == null) {
-            // Nothing is open, so no callback is coming to settle the request.
+            // nothing is open, so no callback is coming
             peripheralDisconnected("Already disconnected");
             return;
         }
 
-        // Only an established link reports back through onConnectionStateChange. Cancelling a
-        // connect that never completed can report nothing at all, which would strand the disconnect
-        // request and leak the GATT client against Android's per-app limit. Settle that case here.
+        // only an established link reports back through onConnectionStateChange, so a connect
+        // that never completed is settled here
         if (!connected) {
             localGatt.disconnect();
             peripheralDisconnected("Connect aborted by a disconnect request");
             return;
         }
 
-        // Deliberately gatt.disconnect() and not closeGatt(): closing now would suppress the
-        // onConnectionStateChange that peripheralDisconnected answers the caller from.
+        // not closeGatt(): that would suppress the onConnectionStateChange we answer from
         localGatt.disconnect();
     }
 
@@ -162,6 +175,12 @@ public class Peripheral extends BluetoothGattCallback {
     @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
     public void peripheralDisconnected(String message) {
         boolean abortedConnect = connecting && !connected;
+        CallbackContext callbackContext;
+
+        synchronized (this) {
+            callbackContext = disconnectCallback;
+            disconnectCallback = null;
+        }
 
         connected = false;
         connecting = false;
@@ -171,22 +190,17 @@ public class Peripheral extends BluetoothGattCallback {
             closeGatt();
         }
 
-        CallbackContext disconnectCallback = bleCentralPlugin.getDisconnectCallback(device.getAddress());
-
-        if (disconnectCallback == null) {
+        if (callbackContext == null) {
             sendDisconnectMessage(message);
         } else {
-            bleCentralPlugin.removeDisconnectCallback(device.getAddress());
-            disconnectCallback.success();
+            callbackContext.success();
             LOG.d(TAG, "Disconnect completed for peripheral " + device.getAddress());
 
             if (abortedConnect) {
-                // The cancelled connect is still owed an answer, and it has to read differently
-                // from a peer drop so the caller can tell a cancel from a unit going away.
+                // the cancelled connect still gets an answer, distinct from a peer drop
                 sendDisconnectMessage("Connect aborted by a disconnect request");
             } else {
-                // A disconnect the caller asked for is not a connect failure, so connect's error
-                // callback stays silent. Release it so the next connect starts from nothing.
+                // a requested disconnect is not a connect failure, so release it unanswered
                 connectCallback = null;
             }
         }
@@ -461,6 +475,14 @@ public class Peripheral extends BluetoothGattCallback {
     @SuppressLint("MissingPermission")
     @Override
     public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+
+        // a cancelled connect can still report in after its gatt was closed, and nobody is waiting
+        if (newState == BluetoothGatt.STATE_CONNECTED && !connecting && !autoconnect) {
+            LOG.d(TAG, "onConnectionStateChange CONNECTED ignored, the connect was cancelled");
+            gatt.disconnect();
+            gatt.close();
+            return;
+        }
 
         this.gatt = gatt;
 

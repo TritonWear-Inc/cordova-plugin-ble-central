@@ -183,7 +183,7 @@
     if (uuid == nil) {
         return;
     }
-
+    
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
@@ -194,7 +194,7 @@
     }
 
     if (peripheral) {
-        // Check if there's a pending disconnect for this peripheral
+        // a disconnect is still settling
         NSString *disconnectCallbackId = [disconnectCallbacks objectForKey:[peripheral uuidAsString]];
         if (disconnectCallbackId) {
             NSString *error = [NSString stringWithFormat:@"Peripheral %@ is currently disconnecting. Please wait for disconnect to complete.", uuid];
@@ -239,7 +239,7 @@
     if (uuid == nil) {
         return;
     }
-
+    
     CBPeripheral *peripheral = [self findPeripheralByUUID:uuid];
     if (!peripheral) {
         peripheral = [self retrievePeripheralWithUUID:uuid];
@@ -248,9 +248,9 @@
             [peripherals setObject:peripheral forKey:peripheral.identifier];
         }
     }
-
+    
     if (peripheral) {
-        // Check if there's a pending disconnect for this peripheral
+        // a disconnect is still settling
         NSString *disconnectCallbackId = [disconnectCallbacks objectForKey:[peripheral uuidAsString]];
         if (disconnectCallbackId) {
             NSString *error = [NSString stringWithFormat:@"Peripheral %@ is currently disconnecting. Please wait for disconnect to complete.", uuid];
@@ -261,7 +261,7 @@
         }
 
         NSLog(@"Autoconnecting to peripheral with UUID : %@", uuid);
-
+        
         [connectCallbacks setObject:[command.callbackId copy] forKey:[peripheral uuidAsString]];
         [self.manager connectPeripheral:peripheral options:nil];
     } else {
@@ -271,7 +271,7 @@
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
     }
-
+    
 }
 
 // disconnect: function (device_id, success, failure) {
@@ -292,7 +292,6 @@
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 
     } else {
-        // Check if already disconnected
         if (peripheral.state == CBPeripheralStateDisconnected) {
             NSLog(@"Peripheral %@ is already disconnected", uuid);
             CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
@@ -300,10 +299,8 @@
             return;
         }
 
-        // Only a link that actually came up reports back through didDisconnectPeripheral. Cancelling
-        // a connection that never completed delivers no delegate callback at all, so a callback
-        // parked for it would never be settled and the guard in connect: would then refuse every
-        // later connect to this peripheral. Answer that case inline instead.
+        // Only an established link reports back through didDisconnectPeripheral. Cancelling a
+        // connect that never completed delivers no callback, so that case is answered below.
         BOOL reportsBackOnDisconnect = peripheral.state == CBPeripheralStateConnected
             || peripheral.state == CBPeripheralStateDisconnecting;
 
@@ -316,16 +313,10 @@
                 return;
             }
 
-            // Store the disconnect callback to track completion
             [disconnectCallbacks setObject:[command.callbackId copy] forKey:[peripheral uuidAsString]];
         }
 
-        // Cancel any in-flight connect for this peripheral. connectCallbacks is keyed by uuidAsString
-        // everywhere else; the previous removeObjectForKey:uuid passed the NSUUID and silently no-opped,
-        // so a pending connect survived the disconnect and later received a generic "Peripheral
-        // Disconnected" from didDisconnectPeripheral, indistinguishable from a real peer drop. Fail it
-        // here with a distinct message so callers can tell a disconnect-initiated cancel from a dropped
-        // unit, and so the connect promise settles now instead of hanging until the JS-side timeout.
+        // fail an in-flight connect now, worded so a cancel reads differently from a peer drop
         NSString *pendingConnectCallbackId = [connectCallbacks valueForKey:[peripheral uuidAsString]];
         if (pendingConnectCallbackId) {
             [connectCallbacks removeObjectForKey:[peripheral uuidAsString]];
@@ -344,7 +335,7 @@
             [self.manager cancelPeripheralConnection:peripheral];
         }
 
-        // An established link answers from didDisconnectPeripheral; anything else is already down.
+        // an established link is answered from didDisconnectPeripheral instead
         if (!reportsBackOnDisconnect) {
             CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
             [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
@@ -989,7 +980,7 @@
 
     peripheral.delegate = self;
 
-    // Overwrite the peripheral in case updates from the CBCentralManager do not come with it
+    // keep the cached handle current
     [peripherals setObject:peripheral forKey:peripheral.identifier];
 
     // NOTE: it's inefficient to discover all services
@@ -1009,14 +1000,14 @@
     [disconnectCallbacks removeObjectForKey:peripheralUUID];
     [self cleanupOperationCallbacks:peripheral withResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Peripheral disconnected"]];
 
-    // Handle disconnect callback if this was an intentional disconnect
+    // a disconnect the app asked for
     if (disconnectCallbackId) {
         CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:disconnectCallbackId];
         NSLog(@"Disconnect completed for peripheral %@", peripheralUUID);
     }
 
-    // Handle connect callback if this was an unexpected disconnect during connection
+    // a connect that was still pending
     if (connectCallbackId) {
         NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:[peripheral asDictionary]];
 
@@ -1047,15 +1038,14 @@
     [disconnectCallbacks removeObjectForKey:peripheralUUID];
     [self cleanupOperationCallbacks:peripheral withResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Peripheral disconnected"]];
 
-    // Handle disconnect callback if this was an intentional disconnect
+    // a disconnect the app asked for
     if (disconnectCallbackId) {
         CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:disconnectCallbackId];
         NSLog(@"Disconnect completed for peripheral %@ (failed to connect)", peripheralUUID);
     }
 
-    // Both can be outstanding at once, so the connect is answered either way rather than dropped
-    // on the way out. Mirrors didDisconnectPeripheral.
+    // both can be outstanding at once, so the connect is answered too
     if (connectCallbackId) {
         NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:[peripheral asDictionary]];
 
