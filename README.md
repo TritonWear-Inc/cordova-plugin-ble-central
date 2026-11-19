@@ -1,6 +1,6 @@
 # Bluetooth Low Energy (BLE) Central Plugin for Apache Cordova
 
-[![npm version](https://img.shields.io/npm/v/cordova-plugin-ble-central.svg?style=flat)](https://www.npmjs.com/package/cordova-plugin-ble-central) ![maintained](https://img.shields.io/maintenance/yes/2025?style=flat-square) [![cordova builds](https://img.shields.io/github/actions/workflow/status/don/cordova-plugin-ble-central/.github/workflows/cordova.yaml?branch=master&style=flat-square&label=cordova%20builds)](https://github.com/don/cordova-plugin-ble-central/actions/workflows/cordova.yaml?query=branch%3Amaster) [![capacitor builds](https://img.shields.io/github/actions/workflow/status/don/cordova-plugin-ble-central/.github/workflows/capacitor.yaml?branch=master&style=flat-square&label=capacitor%20builds)](https://github.com/don/cordova-plugin-ble-central/actions/workflows/capacitor.yaml?query=branch%3Amaster) [![license](https://img.shields.io/npm/l/cordova-plugin-ble-central.svg?style=flat)](https://www.npmjs.com/package/cordova-plugin-ble-central)
+[![npm version](https://img.shields.io/npm/v/cordova-plugin-ble-central.svg?style=flat)](https://www.npmjs.com/package/cordova-plugin-ble-central) ![maintained](https://img.shields.io/maintenance/yes/2026?style=flat-square) [![cordova builds](https://img.shields.io/github/actions/workflow/status/don/cordova-plugin-ble-central/.github/workflows/cordova.yaml?branch=master&style=flat-square&label=cordova%20builds)](https://github.com/don/cordova-plugin-ble-central/actions/workflows/cordova.yaml?query=branch%3Amaster) [![capacitor builds](https://img.shields.io/github/actions/workflow/status/don/cordova-plugin-ble-central/.github/workflows/capacitor.yaml?branch=master&style=flat-square&label=capacitor%20builds)](https://github.com/don/cordova-plugin-ble-central/actions/workflows/capacitor.yaml?query=branch%3Amaster) [![license](https://img.shields.io/npm/l/cordova-plugin-ble-central.svg?style=flat)](https://www.npmjs.com/package/cordova-plugin-ble-central)
 
 This plugin enables communication between a phone and Bluetooth Low Energy (BLE) peripherals.
 
@@ -77,7 +77,7 @@ All variables can be modified after installation by updating the values in `pack
 
 -   `BLUETOOTH_USAGE_DESCRIPTION`: [**iOS**] defines the values for [NSBluetoothAlwaysUsageDescription](https://developer.apple.com/documentation/bundleresources/information_property_list/nsbluetoothalwaysusagedescription?language=objc).
 
--   `IOS_INIT_ON_LOAD`: [**iOS**] Prevents the Bluetooth plugin from being initialised until first access to the `ble` window object. This allows an application to warn the user before the Bluetooth access permission is requested.
+-   `IOS_INIT_ON_LOAD`: [**iOS**] Prevents the Bluetooth plugin from being initialised until first access to the `ble` window object. The permission prompt no longer depends on this setting: the central manager is built by the first call that needs Bluetooth, whenever the plugin itself was loaded.
 
 -   `BLUETOOTH_RESTORE_STATE`: [**iOS**] Enable Bluetooth state restoration, allowing an app to be woken up to receive scan results and peripheral notifications. This is needed for background scanning support. See [iOS restore state](https://developer.apple.com/library/archive/documentation/NetworkingInternetWeb/Conceptual/CoreBluetooth_concepts/CoreBluetoothBackgroundProcessingForIOSApps/PerformingTasksWhileYourAppIsInTheBackground.html#//apple_ref/doc/uid/TP40013257-CH7-SW13). For more information about background operation with this plugin, see [Background Scanning and Notifications on iOS](#background-scanning-and-notifications-on-ios).
 
@@ -932,29 +932,64 @@ ble.bluetoothAuthorization(success, failure);
 
 ### Description
 
-Function `bluetoothAuthorization` calls the success callback with the current permission as a
-string: `authorized`, `denied`, `restricted` or `notDetermined`.
+Function `bluetoothAuthorization` reports the permission differently on each platform, because
+each platform knows a different amount. iOS calls back with a status string. Android calls back
+with the names of the permissions it still needs.
 
-Unlike every other call in this plugin, this one is safe to make before you have decided to prompt.
-On iOS it reads `CBManager.authorization`, a class property, and never constructs the central
-manager, which is the thing that shows the permission dialog. Use it to skip an ask the user has
-already answered, or to tell a refusal apart from a switched-off radio.
+On iOS it reads `CBManager.authorization`, a class property added in iOS 13.1, so it never
+constructs the central manager, which is the thing that shows the permission dialog. Use it to skip
+an ask the user has already answered, or to tell a refusal apart from a switched-off radio. On
+iOS 13.0 the permission cannot be read at all without prompting, so it reports `notDetermined`
+there.
 
-On Android only `authorized` and `notDetermined` are reported, because a permission Android has not
-granted reads the same whether the user refused it or was never asked. The permissions it checks
-are the ones a scan requires on that API level, so its answer matches what `startScan` would demand.
+Reading the permission leaves the prompt unspent. The central manager is built by the first call
+that actually needs Bluetooth, which this one does not, so an app can read the permission, show its
+own explanation of why it wants Bluetooth, and only then make a call that asks.
+
+On Android it calls back with an array of the permissions this plugin needs that the app has not
+been granted, empty when none are outstanding. Android cannot tell a refusal apart from a
+permission that was never requested, so naming what is missing says more than any single status
+could: an app can see which capability it is short of and ask for that one.
+
+A permission is listed only when the running API level is one it applies to and the app declares it
+in its manifest. An app that scans with `neverForLocation` genuinely needs no location permission,
+and listing one for it would be noise. The install-time `BLUETOOTH` and `BLUETOOTH_ADMIN` are never
+listed, since they are granted when the app is installed or not at all, so a user cannot be the
+reason one is absent.
+
+| Permission | Listed on |
+| --- | --- |
+| `ACCESS_COARSE_LOCATION` | API 28 and below |
+| `ACCESS_FINE_LOCATION` | API 30 and below |
+| `ACCESS_BACKGROUND_LOCATION` | API 29 and up, with `ACCESS_BACKGROUND_LOCATION=true` |
+| `BLUETOOTH_SCAN` | API 31 and up |
+| `BLUETOOTH_CONNECT` | API 31 and up |
+
+This is a wider view than the scan gate. `startScan` still asks for exactly the permissions a scan
+requires at that API level, which on API 31 and up does not include location at all.
 
 ### Parameters
 
--   **success**: Success callback function, invoked with the authorization string.
+-   **success**: Success callback function. Invoked with the authorization string on iOS, and with
+    an array of missing permission names on Android.
 -   **failure**: Error callback function, invoked when the device has no Bluetooth LE support.
 
 ### Quick Example
 
 ```javascript
+// iOS
 ble.bluetoothAuthorization(function (authorization) {
     if (authorization === 'notDetermined') {
         // the prompt is unspent, so our own explanation is still worth showing
+    }
+});
+
+// Android
+ble.bluetoothAuthorization(function (missingPermissions) {
+    if (missingPermissions.length === 0) {
+        // everything this plugin needs has been granted
+    } else if (missingPermissions.indexOf('android.permission.ACCESS_BACKGROUND_LOCATION') !== -1) {
+        // scanning works, but not while the app is in the background
     }
 });
 ```

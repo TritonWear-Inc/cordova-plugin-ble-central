@@ -33,6 +33,7 @@ import android.os.ParcelUuid;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.IntentFilter;
 import android.os.Handler;
@@ -52,8 +53,6 @@ import org.json.JSONObject;
 import org.json.JSONException;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 import static android.bluetooth.BluetoothDevice.DEVICE_TYPE_DUAL;
 import static android.bluetooth.BluetoothDevice.DEVICE_TYPE_LE;
@@ -128,11 +127,6 @@ public class BLECentralPlugin extends CordovaPlugin {
 
     // key is the MAC Address
     Map<String, Peripheral> peripherals = new LinkedHashMap<String, Peripheral>();
-
-    // disconnect callbacks - key is MAC Address, value is CallbackContext
-    // Written from the Cordova thread and read from the binder thread that delivers
-    // onConnectionStateChange, so it cannot be a plain HashMap.
-    final ConcurrentMap<String, CallbackContext> disconnectCallbacks = new ConcurrentHashMap<String, CallbackContext>();
 
     // scan options
     boolean reportDuplicates = false;
@@ -338,7 +332,7 @@ public class BLECentralPlugin extends CordovaPlugin {
 
         } else if (action.equals(BLUETOOTH_AUTHORIZATION)) {
 
-            callbackContext.success(listMissingScanPermissions().isEmpty() ? "authorized" : "notDetermined");
+            callbackContext.success(new JSONArray(listMissingPermissions()));
 
         } else if (action.equals(IS_ENABLED)) {
 
@@ -614,7 +608,7 @@ public class BLECentralPlugin extends CordovaPlugin {
 
             // just low energy devices (filters out classic and unknown devices)
             if (type == DEVICE_TYPE_LE || type == DEVICE_TYPE_DUAL) {
-                Peripheral p = new Peripheral(this, device);
+                Peripheral p = new Peripheral(device);
                 bonded.put(p.asJSONObject());
             }
         }
@@ -761,21 +755,12 @@ public class BLECentralPlugin extends CordovaPlugin {
 
         if (!peripherals.containsKey(macAddress) && BluetoothAdapter.checkBluetoothAddress(macAddress)) {
             BluetoothDevice device = BLECentralPlugin.this.bluetoothAdapter.getRemoteDevice(macAddress);
-            Peripheral peripheral = new Peripheral(this, device);
+            Peripheral peripheral = new Peripheral(device);
             peripherals.put(macAddress, peripheral);
         }
 
         Peripheral peripheral = peripherals.get(macAddress);
         if (peripheral != null) {
-            // Check if there's a pending disconnect for this peripheral
-            CallbackContext disconnectCallback = disconnectCallbacks.get(macAddress);
-            if (disconnectCallback != null) {
-                String error = "Peripheral " + macAddress + " is currently disconnecting. Please wait for disconnect to complete.";
-                LOG.w(TAG, error);
-                callbackContext.error(error);
-                return;
-            }
-
             // #894: BLE adapter state listener required so disconnect can be fired on BLE disabled
             addStateListener();
             peripheral.connect(callbackContext, cordova.getActivity(), false);
@@ -809,21 +794,12 @@ public class BLECentralPlugin extends CordovaPlugin {
         if (peripheral == null) {
             if (BluetoothAdapter.checkBluetoothAddress(macAddress)) {
                 BluetoothDevice device = bluetoothAdapter.getRemoteDevice(macAddress);
-                peripheral = new Peripheral(this, device);
+                peripheral = new Peripheral(device);
                 peripherals.put(device.getAddress(), peripheral);
             } else {
                 callbackContext.error(macAddress + " is not a valid MAC address.");
                 return;
             }
-        }
-
-        // Check if there's a pending disconnect for this peripheral
-        CallbackContext disconnectCallback = disconnectCallbacks.get(macAddress);
-        if (disconnectCallback != null) {
-            String error = "Peripheral " + macAddress + " is currently disconnecting. Please wait for disconnect to complete.";
-            LOG.w(TAG, error);
-            callbackContext.error(error);
-            return;
         }
 
         // #894: BLE adapter state listener required so disconnect can be fired on BLE disabled
@@ -834,26 +810,17 @@ public class BLECentralPlugin extends CordovaPlugin {
 
     @SuppressLint("MissingPermission")
     private void disconnect(CallbackContext callbackContext, String macAddress) {
+
         Peripheral peripheral = peripherals.get(macAddress);
         if (peripheral != null) {
-            // A connect still in flight counts as something to take down: isConnected alone would
-            // report nothing to do here and leave that connect running behind the caller's back.
+            // a connect still in flight also needs taking down
             if (!peripheral.isConnected() && !peripheral.isConnecting()) {
                 LOG.d(TAG, "Peripheral " + macAddress + " is already disconnected");
                 callbackContext.success();
                 return;
             }
 
-            // Store the disconnect callback to track completion
-            if (disconnectCallbacks.putIfAbsent(macAddress, callbackContext) != null) {
-                String message = "Peripheral " + macAddress + " is already disconnecting.";
-                LOG.w(TAG, message);
-                callbackContext.error(message);
-                return;
-            }
-
-            // Initiate disconnect - don't return success immediately
-            peripheral.disconnect();
+            peripheral.disconnect(callbackContext);
         } else {
             String message = "Peripheral " + macAddress + " not found.";
             LOG.w(TAG, message);
@@ -935,7 +902,7 @@ public class BLECentralPlugin extends CordovaPlugin {
 
         if (!peripherals.containsKey(macAddress) && BluetoothAdapter.checkBluetoothAddress(macAddress)) {
             BluetoothDevice device = BLECentralPlugin.this.bluetoothAdapter.getRemoteDevice(macAddress);
-            Peripheral peripheral = new Peripheral(this, device);
+            Peripheral peripheral = new Peripheral(device);
             peripherals.put(macAddress, peripheral);
         }
 
@@ -961,7 +928,7 @@ public class BLECentralPlugin extends CordovaPlugin {
 
         if (!peripherals.containsKey(macAddress) && BluetoothAdapter.checkBluetoothAddress(macAddress)) {
             BluetoothDevice device = BLECentralPlugin.this.bluetoothAdapter.getRemoteDevice(macAddress);
-            Peripheral peripheral = new Peripheral(this, device);
+            Peripheral peripheral = new Peripheral(device);
             peripherals.put(macAddress, peripheral);
         }
 
@@ -986,7 +953,7 @@ public class BLECentralPlugin extends CordovaPlugin {
 
         if (!peripherals.containsKey(macAddress) && BluetoothAdapter.checkBluetoothAddress(macAddress)) {
             BluetoothDevice device = BLECentralPlugin.this.bluetoothAdapter.getRemoteDevice(macAddress);
-            Peripheral peripheral = new Peripheral(this, device);
+            Peripheral peripheral = new Peripheral(device);
             peripherals.put(macAddress, peripheral);
         }
 
@@ -1219,7 +1186,7 @@ public class BLECentralPlugin extends CordovaPlugin {
                     isConnectable = result.isConnectable();
                 }
 
-                Peripheral peripheral = new Peripheral(BLECentralPlugin.this, device, result.getRssi(), result.getScanRecord().getBytes(), isConnectable);
+                Peripheral peripheral = new Peripheral(device, result.getRssi(), result.getScanRecord().getBytes(), isConnectable);
                 peripherals.put(device.getAddress(), peripheral);
 
                 if (discoverCallback != null) {
@@ -1257,11 +1224,57 @@ public class BLECentralPlugin extends CordovaPlugin {
     };
 
 
-    /**
-     * The scan permissions this device still needs, which differ by API level. Reading them costs
-     * nothing and shows the user nothing, so bluetoothAuthorization answers from the same ladder
-     * the scan itself enforces and the two cannot drift apart.
-     */
+    // What a scan needs at this API level, and the gate startScan enforces. Narrower on purpose
+    // than listMissingPermissions, which reports everything the plugin can need.
+    // Everything the plugin can need, so a caller can tell which capability the user withheld
+    // rather than only whether scanning would work. BLUETOOTH and BLUETOOTH_ADMIN are absent
+    // because they are install-time: a user can never be the reason one is missing.
+    private List<String> listMissingPermissions() {
+        List<String> missingPermissions = new ArrayList<String>();
+        List<String> declaredPermissions = listDeclaredPermissions();
+
+        addMissingPermission(missingPermissions, declaredPermissions, Manifest.permission.ACCESS_COARSE_LOCATION, 0, 28);
+        addMissingPermission(missingPermissions, declaredPermissions, Manifest.permission.ACCESS_FINE_LOCATION, 0, 30);
+        addMissingPermission(missingPermissions, declaredPermissions, ACCESS_BACKGROUND_LOCATION, 29, Integer.MAX_VALUE);
+        addMissingPermission(missingPermissions, declaredPermissions, BLUETOOTH_SCAN, 31, Integer.MAX_VALUE);
+        addMissingPermission(missingPermissions, declaredPermissions, BLUETOOTH_CONNECT, 31, Integer.MAX_VALUE);
+
+        return missingPermissions;
+    }
+
+    // The declared check carries this: an app scanning with neverForLocation needs no location
+    // permission, and would otherwise be told forever that it is missing one.
+    // https://developer.android.com/develop/connectivity/bluetooth/bt-permissions
+    private void addMissingPermission(List<String> missingPermissions, List<String> declaredPermissions,
+                                      String permission, int minSdkVersion, int maxSdkVersion) {
+        if (Build.VERSION.SDK_INT < minSdkVersion || Build.VERSION.SDK_INT > maxSdkVersion) {
+            return;
+        }
+
+        if (!declaredPermissions.contains(permission)) {
+            return;
+        }
+
+        if (!PermissionHelper.hasPermission(this, permission)) {
+            missingPermissions.add(permission);
+        }
+    }
+
+    private List<String> listDeclaredPermissions() {
+        try {
+            PackageInfo packageInfo = cordova.getActivity()
+                    .getPackageManager()
+                    .getPackageInfo(cordova.getActivity().getPackageName(), PackageManager.GET_PERMISSIONS);
+
+            return packageInfo.requestedPermissions == null
+                    ? new ArrayList<String>()
+                    : Arrays.asList(packageInfo.requestedPermissions);
+        } catch (PackageManager.NameNotFoundException err) {
+            LOG.w(TAG, "Could not read the permissions this app declares", err);
+            return new ArrayList<String>();
+        }
+    }
+
     private List<String> listMissingScanPermissions() {
         List<String> missingPermissions = new ArrayList<String>();
         if (COMPILE_SDK_VERSION >= 31 && Build.VERSION.SDK_INT >= 31) { // (API 31) Build.VERSION_CODE.S
@@ -1590,15 +1603,6 @@ public class BLECentralPlugin extends CordovaPlugin {
             webView.getContext().unregisterReceiver(bondStateReceiver);
             bondStateReceiver = null;
         }
-    }
-
-    // Helper methods for disconnect callback management
-    public CallbackContext getDisconnectCallback(String macAddress) {
-        return disconnectCallbacks.get(macAddress);
-    }
-
-    public void removeDisconnectCallback(String macAddress) {
-        disconnectCallbacks.remove(macAddress);
     }
 
     @SuppressLint({"UnspecifiedRegisterReceiverFlag", "WrongConstant"})
