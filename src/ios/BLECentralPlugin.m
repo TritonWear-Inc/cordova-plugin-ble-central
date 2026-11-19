@@ -63,9 +63,8 @@
                        nil];
     readRSSICallbacks = [NSMutableDictionary new];
 
-    // State restoration is handed to the delegate during launch, so it is the one configuration
-    // that still needs the manager this early. Every other setup waits for the first real
-    // Bluetooth call, because constructing the manager is what shows the permission prompt.
+    // Restored state is handed to the delegate during launch, so this is the one setting that still
+    // needs the manager built this early.
     if (![self isFalsey:[[self commandDelegate] settings][@"bluetooth_restore_state"]]) {
         [self manager];
     }
@@ -87,9 +86,8 @@
     return options;
 }
 
-// Built on first use rather than at plugin load. On iOS, constructing a CBCentralManager is
-// itself the permission prompt, so an action that does not need the radio must not reach this.
-// Cordova dispatches every action on one thread, so the check needs no lock.
+// Not in pluginInitialize, because constructing a CBCentralManager is what shows the permission
+// dialog. Built on first real use instead, so loading the plugin costs nothing.
 - (CBCentralManager *)manager {
     if (_manager == nil) {
         _manager = [[CBCentralManager alloc] initWithDelegate:self queue:nil options:[self centralManagerOptions]];
@@ -98,10 +96,10 @@
     return _manager;
 }
 
-// Constructing the central manager is asynchronous: until centralManagerDidUpdateState arrives its
-// state reads CBManagerStateUnknown, so an action that ran straight after construction would decide
-// Bluetooth was off while the radio was on. Hold the action instead and run it once the state is
-// real. Returns YES when the caller was deferred and must do nothing further.
+// Construction is asynchronous: the state reads CBManagerStateUnknown until the delegate reports,
+// so an action running straight after it would call Bluetooth off while the radio was on. Holds
+// the action instead, and answers YES when it did.
+// https://developer.apple.com/documentation/corebluetooth/cbcentralmanagerdelegate/1518888-centralmanagerdidupdatestate?language=objc
 - (BOOL)deferUntilManagerStateIsKnown:(void (^)(void))action {
     if ([self.manager state] != CBManagerStateUnknown) {
         return NO;
@@ -487,13 +485,12 @@
     }
 }
 
-// Answers without constructing a central manager, which is the only way to ask the OS without
-// also asking the user. CBManager.authorization is a class property as of iOS 13.1, and its
-// documentation calls out checking the status before allocating a CBManager.
+// Reads the permission without constructing a manager, which is the only way to ask the OS without
+// also asking the user.
+// https://developer.apple.com/documentation/corebluetooth/cbmanager
 - (void)bluetoothAuthorization:(CDVInvokedUrlCommand *)command {
-    // The class property arrived in 13.1, one point release after Bluetooth started asking at all.
-    // On 13.0 the permission cannot be read without constructing a manager, which is the prompt, so
-    // it answers not-determined and the caller behaves as it did before this action existed.
+    // The class property landed in 13.1, a point release after Bluetooth began asking. On 13.0 the
+    // answer is unreachable without prompting, so callers see what they saw before this existed.
     NSString *authorization = @"notDetermined";
 
     if (@available(iOS 13.1, *)) {
@@ -623,6 +620,13 @@
     CDVPluginResult *pluginResult = nil;
 
     if (stateCallbackId == nil) {
+        // The first result here is the current state, so reading it early would open the listener
+        // with "unknown". stateCallbackId is still nil on the replay, so the delegate's own emit
+        // stays quiet that pass and this reports the real state exactly once.
+        if ([self deferUntilManagerStateIsKnown:^{ [self startStateNotifications:command]; }]) {
+            return;
+        }
+
         stateCallbackId = [command.callbackId copy];
         CBManagerState bluetoothState = [self.manager state];
         NSString *state = [bluetoothStates objectForKey:@(bluetoothState)];
@@ -739,7 +743,7 @@
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
         return;
     }
-
+    
     NSArray<CBPeripheral *> *foundPeripherals = [self.manager retrievePeripheralsWithIdentifiers:identifiers];
     // TODO are any of these connected?
     NSMutableArray<NSDictionary *> *found = [NSMutableArray new];
@@ -904,8 +908,8 @@
         }
     }];
 
-    // Last, so anything held while the state was unknown starts from the swept state rather than
-    // racing the cleanup above. Any state but unknown is an answer, including off and unauthorized.
+    // Last, so held actions start from the swept state. Any state but unknown is an answer,
+    // including off and unauthorized, so nothing waits forever.
     if (central.state != CBManagerStateUnknown) {
         [self runPendingManagerStateCommands];
     }
@@ -1652,7 +1656,8 @@
 - (void) internalStopScan {
     [scanTimer invalidate];
     scanTimer = nil;
-
+    
+    // The ivar, not the property: no manager means no scan to stop, and the getter would build one.
     if (_manager != nil && [_manager state] == CBManagerStatePoweredOn) {
         [_manager stopScan];
     }
